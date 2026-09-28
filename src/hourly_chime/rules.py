@@ -101,9 +101,10 @@ def holiday_of(t: datetime, events: list[Event], cfg: Config) -> Event | None:
 
 def readable_title(e: Event, cfg: Config) -> str | None:
     """読み上げてよい予定名。busy_only のカレンダーや名前の無い予定は None。"""
-    if e.calendar in _busy_only(cfg) or not e.title:
+    if e.calendar in _busy_only(cfg):
         return None
-    return e.title
+    title = cfg.countdown.strip(e.title) if cfg.countdown.matches(e) else e.title
+    return title or None
 
 
 def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Config) -> str:
@@ -218,6 +219,8 @@ def plan_window(start: datetime, end: datetime, events: list[Event], cfg: Config
     # 正時始まりでない予定 (開始時刻でまとめる)
     groups: dict[datetime, list[Event]] = {}
     for e in events:
+        if cfg.countdown.matches(e):
+            continue  # カウントダウン側で鳴らす
         if not e.all_day and (e.start.minute, e.start.second) != (0, 0):
             if start <= e.start <= end + timedelta(minutes=2):
                 groups.setdefault(e.start, []).append(e)

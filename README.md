@@ -18,6 +18,17 @@ Google カレンダー (iCal) と連動する音声時報。WSL2 + Windows 用�
 - 休日 (`holiday` のカレンダーに条件に合う終日予定がある日) は `holiday.hours` の正時だけ、ピピピポーン「N時です。」+ 次の時報までに始まる予定 (`quiet_hours` より優先)
 - `off_days` の曜日と、`off_days.title` に合う終日予定がある日は一切鳴らさない
 
+### カウントダウン
+
+指定時刻に向けて 30/20/10/5/2/1 分前に「15時30分まで、あと30分です。」、時刻ちょうどにピピピポーン「15時30分です。」。
+`quiet_hours`・休日・`off_days` に関係なく鳴らし、10 秒以内に重なる時報は鳴らさない。
+
+- コマンド: `hourly-chime countdown 15:30` (`1530`、`+45` = 45 分後、`--offsets 30,10,5`)。
+  一覧 `--list`、取り消し `--cancel ID|all`
+- カレンダー: 予定名が `countdown.title` (既定 `^⏰`) に合う予定の開始時刻。例: 「⏰出発」
+  (この予定には通常の予定 Cue は鳴らさず、案内では印を外して読む)
+- Google カレンダーの「タスク」は API で時刻が取れない (日付のみ) ので使えない
+
 ```
 タスクスケジューラ (5 分ごと x4:00/x9:00) → conhost --headless wsl.exe → hourly-chime chime
   → ICS 取得 (キャッシュ) → 起動 30 秒後からの 5 分間の計画 → TTS + 時報音を wav に合成
@@ -50,6 +61,7 @@ powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w scripts/install_task.
 | `demo [--sound-only] [--at ...]` | 次の正時の時報を間を詰めて今すぐ鳴らす |
 | `simulate [--hours N] [--all]` | この先の時報を一覧表示 |
 | `events [--hours N] [--refresh]` | 予定一覧 |
+| `countdown TIME [--offsets ...] / --list / --cancel ID` | カウントダウン |
 | `say TEXT` | 音声確認 |
 
 - 設定: `~/.config/hourly-chime/config.yaml` (書式は `config.example.yaml`)

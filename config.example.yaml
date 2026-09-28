@@ -39,6 +39,15 @@ off_days:
   calendar: private
   title: "有休|有給|休暇|年休|休み|全休|休日|休業"
 
+# カウントダウン: 指定時刻に向けて offsets 分前に「H時M分まで、あとN分です。」、時刻にピピピポーン。
+# quiet_hours・休日・off_days に関係なく鳴らし、重なった時報より優先する。
+#   コマンド: hourly-chime countdown 15:30 / 1530 / +45  [--offsets 30,10,5]
+#   カレンダー: 予定名が title に合う予定の開始時刻 (例: 「⏰出発」)
+countdown:
+  offsets: [30, 20, 10, 5, 2, 1]
+  title: "^⏰"
+  # calendar: roo  # title を見るカレンダーを絞る場合
+
 announce:
   template: "{start}から、{title}です。"  # 5分前・正時の予定案内。変数: {start} {title} {calendar}
   event_start_template: "{title}です。"  # 予定開始時

@@ -65,6 +65,24 @@ class OffDays:
 
 
 @dataclass(frozen=True)
+class CountdownConfig:
+    offsets: tuple[int, ...] = (30, 20, 10, 5, 2, 1)  # 分前
+    title: re.Pattern[str] | None = None  # この予定名の開始時刻に向けてカウントダウン
+    calendars: tuple[str, ...] | None = None  # title を見るカレンダー (None なら全て)
+
+    def matches(self, e: Any) -> bool:
+        return (
+            self.title is not None
+            and (self.calendars is None or e.calendar in self.calendars)
+            and bool(self.title.search(e.title))
+        )
+
+    def strip(self, title: str) -> str:
+        """読み上げ用に印を外す。"""
+        return self.title.sub("", title, count=1).strip() if self.title else title
+
+
+@dataclass(frozen=True)
 class TTSConfig:
     engine: str = "sapi"  # sapi | voicevox
     sapi_voice: str = "Microsoft Haruka Desktop"
@@ -82,6 +100,7 @@ class Config:
     quiet_hours: QuietHours | None = None
     holiday: HolidayMode | None = None
     off: OffDays | None = None
+    countdown: CountdownConfig = field(default_factory=CountdownConfig)
     announce_template: str = "{start}から、{title}です。"
     event_start_template: str = "{title}です。"
     announce_untitled_template: str = "{start}から、予定があります。"
@@ -145,6 +164,14 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
             calendars=None if cals is None else ((cals,) if isinstance(cals, str) else tuple(cals)),
         )
 
+    cd = raw.get("countdown") or {}
+    cd_cals = cd.get("calendar")
+    countdown = CountdownConfig(
+        offsets=tuple(cd.get("offsets") or CountdownConfig.offsets),
+        title=re.compile(cd["title"]) if cd.get("title") else None,
+        calendars=None if cd_cals is None else ((cd_cals,) if isinstance(cd_cals, str) else tuple(cd_cals)),
+    )
+
     an = raw.get("announce") or {}
     t = raw.get("tts") or {}
     sapi = t.get("sapi") or {}
@@ -165,6 +192,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         quiet_hours=quiet,
         holiday=holiday,
         off=off,
+        countdown=countdown,
         announce_template=an.get("template", Config.announce_template),
         event_start_template=an.get("event_start_template", Config.event_start_template),
         announce_untitled_template=an.get("untitled_template", Config.announce_untitled_template),

@@ -301,3 +301,84 @@ def test_secret_url_overrides_and_missing_url_errors():
     with pytest.raises(ValueError, match="secrets.yaml"):
         parse_config(raw)
     assert "http" not in repr(cfg.calendars)
+
+
+# --- カウントダウン ---
+
+from hourly_chime import countdown as cdm  # noqa: E402
+from hourly_chime.main import grid_floor  # noqa: E402
+
+CD_CFG = parse_config(
+    {
+        "calendars": [{"name": "roo", "url": "x"}],
+        "quiet_hours": {"start": "21:00", "end": "08:00"},
+        "countdown": {"title": "^⏰"},
+    }
+)
+
+
+def test_countdown_cues():
+    cd = cdm.Countdown(at(15, 30), (30, 20, 10, 5, 2, 1))
+    got = [(c.at, c.sound, c.text) for c in cdm.cues_of(cd)]
+    assert got[0] == (at(15), None, "15時30分まで、あと30分です。")
+    assert got[-2] == (at(15, 29), None, "15時30分まで、あと1分です。")
+    assert got[-1] == (at(15, 30), "pipipipoon", "15時30分です。")
+    assert len(got) == 7
+
+
+def test_countdown_overrides_colliding_hour_cue():
+    cd = cdm.cues_of(cdm.Countdown(at(15, 30), (30,)))  # 30分前 = 15:00 ちょうど
+    base = plan_window(at(14, 54, 30), at(15, 4, 30), [], CD_CFG)
+    merged = cdm.merge(base, cd)
+    at15 = [c for c in merged if c.at == at(15)]
+    assert [c.label for c in at15] == ["CD30分前"]
+    assert any(c.label == "15秒前" for c in merged)  # 14:59:45 は 15 秒離れているので残る
+
+
+def test_countdown_from_calendar_event_and_not_event_cues():
+    e = ev("roo", "⏰出発", at(15, 30), at(15, 30))
+    cds = cdm.from_events([e], CD_CFG)
+    assert [c.at for c in cds] == [at(15, 30)]
+    # 通常の予定 Cue (2分前等) は出さない
+    assert not [c for c in plan_window(at(15, 20), at(15, 35), [e], CD_CFG) if not c.silent]
+    # 5分前の案内では印を外して読む
+    assert summary_cfg(at(15), [e], CD_CFG)[0][1] == "15時5分前です。15時30分から、出発です。"
+
+
+def test_countdown_ignores_quiet_hours():
+    cd = cdm.cues_of(cdm.Countdown(at(23, 0), (5,)))
+    assert [c.text for c in cdm.merge(plan_window(at(22, 50), at(23, 5), [], CD_CFG), cd) if not c.silent] == [
+        "23時まで、あと5分です。",
+        "23時です。",
+    ]
+
+
+def summary_cfg(target, events, cfg):
+    return [(p.sound, p.text) for p in plan_hour(target, events, cfg)]
+
+
+def test_parse_time():
+    now = at(14, 10, 30)
+    assert cdm.parse_time("15:30", now) == at(15, 30)
+    assert cdm.parse_time("1530", now) == at(15, 30)
+    assert cdm.parse_time("930", now) == at(9, 30, day=29)  # 過ぎていれば明日
+    assert cdm.parse_time("+45", now) == at(14, 55)
+    assert cdm.parse_time("2026-09-30T08:00", now) == at(8, day=30)
+
+
+def test_store_roundtrip(tmp_path):
+    p = tmp_path / "cd.json"
+    a = cdm.add(at(15, 30), (10, 5), at(14), p)
+    cdm.add(at(16), (5,), at(14), p)
+    assert [c.at for c in cdm.load(p)] == [at(15, 30), at(16)]
+    assert [c.id for c in cdm.remove({a.id}, p)] == [a.id]
+    assert [c.at for c in cdm.load(p)] == [at(16)]
+    cdm.add(at(17), (5,), at(16, 30), p)  # 過去のものは掃除される
+    assert [c.at for c in cdm.load(p)] == [at(17)]
+
+
+def test_grid_floor():
+    assert grid_floor(at(14, 4)) == at(14, 4)
+    assert grid_floor(at(14, 8, 59)) == at(14, 4)
+    assert grid_floor(at(14, 9, 0)) == at(14, 9)
+    assert grid_floor(at(14, 3)) == at(13, 59)
