@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -11,6 +12,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import yaml
+
+log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = (
     Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hourly-chime" / "config.yaml"
@@ -22,7 +25,7 @@ STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "stat
 @dataclass(frozen=True)
 class CalendarSource:
     name: str
-    url: str
+    url: str = field(repr=False)  # 非公開 URL を含むことがあるので repr に出さない
     busy_only: bool = False  # 予定名は読まず、時間枠 (予定中かどうか) だけ使う
 
 
@@ -81,6 +84,8 @@ class Config:
     off: OffDays | None = None
     announce_template: str = "{start}から、{title}です。"
     event_start_template: str = "{title}です。"
+    announce_untitled_template: str = "{start}から、予定があります。"
+    event_start_untitled_template: str = "予定の時間です。"
     announce_max: int = 3
     tts: TTSConfig = field(default_factory=TTSConfig)
     player: str = "windows"  # windows | paplay
@@ -93,15 +98,16 @@ def _time(v: Any) -> time:
     return time.fromisoformat(str(v))
 
 
-def parse_config(raw: dict[str, Any]) -> Config:
-    calendars = tuple(
-        CalendarSource(
-            name=c["name"],
-            url=c["url"],
-            busy_only=bool(c.get("busy_only", False)),
-        )
-        for c in raw.get("calendars") or []
-    )
+def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> Config:
+    """raw: config.yaml、secrets: secrets.yaml。カレンダーの url は secrets.calendars.<name> を優先する。"""
+    secret_urls = (secrets or {}).get("calendars") or {}
+    calendars = []
+    for c in raw.get("calendars") or []:
+        url = secret_urls.get(c["name"]) or c.get("url")
+        if not url:
+            raise ValueError(f"カレンダー {c['name']} の url がありません (secrets.yaml の calendars.{c['name']} に書く)")
+        calendars.append(CalendarSource(name=c["name"], url=url, busy_only=bool(c.get("busy_only", False))))
+    calendars = tuple(calendars)
     names = [c.name for c in calendars]
     if len(set(names)) != len(names):
         raise ValueError(f"calendars の name が重複しています: {names}")
@@ -161,12 +167,26 @@ def parse_config(raw: dict[str, Any]) -> Config:
         off=off,
         announce_template=an.get("template", Config.announce_template),
         event_start_template=an.get("event_start_template", Config.event_start_template),
+        announce_untitled_template=an.get("untitled_template", Config.announce_untitled_template),
+        event_start_untitled_template=an.get("event_start_untitled_template", Config.event_start_untitled_template),
         announce_max=an.get("max_items", Config.announce_max),
         tts=tts,
         player=raw.get("player", "windows"),
     )
 
 
-def load_config(path: Path) -> Config:
+def _read_yaml(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
-        return parse_config(yaml.safe_load(f) or {})
+        return yaml.safe_load(f) or {}
+
+
+def load_config(path: Path, secrets_path: Path | None = None) -> Config:
+    """secrets_path 省略時は config と同じディレクトリの secrets.yaml (無ければ使わない)。"""
+    raw = _read_yaml(path)
+    secrets_path = secrets_path or path.with_name("secrets.yaml")
+    secrets = None
+    if secrets_path.exists():
+        if secrets_path.stat().st_mode & 0o077:
+            log.warning("%s が他ユーザーから読めます。chmod 600 してください", secrets_path)
+        secrets = _read_yaml(secrets_path)
+    return parse_config(raw, secrets)

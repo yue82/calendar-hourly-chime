@@ -13,7 +13,7 @@ Google カレンダー (iCal) と連動する音声時報。WSL2 + Windows 用�
 
 - 「予定中」= その時刻に終日以外の予定が入っている (全カレンダー対象)
 - 正時始まりでない予定には、その 2分前「2分前です。」・15秒前「15秒前です。」・開始時 ピピピポーン「H時M分です。(予定名)です。」を鳴らす。鳴らす時刻に他の予定が入っていればその回は鳴らさない
-- `busy_only` のカレンダーは予定名を読まず、時間枠の判定だけに使う
+- `busy_only` のカレンダーや名前の無い予定は、予定名の代わりに「予定があります」「予定の時間です」と知らせる
 - `quiet_hours` の間は鳴らさない
 - 休日 (`holiday` のカレンダーに条件に合う終日予定がある日) は `holiday.hours` の正時だけ、ピピピポーン「N時です。」+ 次の時報までに始まる予定 (`quiet_hours` より優先)
 - `off_days` の曜日と、`off_days.title` に合う終日予定がある日は一切鳴らさない
@@ -29,7 +29,8 @@ Google カレンダー (iCal) と連動する音声時報。WSL2 + Windows 用�
 ```sh
 uv sync
 mkdir -p ~/.config/hourly-chime
-cp config.example.yaml ~/.config/hourly-chime/config.yaml   # iCal URL などを編集
+cp config.example.yaml ~/.config/hourly-chime/config.yaml   # 普段の設定
+install -m 600 secrets.example.yaml ~/.config/hourly-chime/secrets.yaml  # 非公開 URL・キー
 uv run hourly-chime demo                                     # 次の正時の時報を詰めて今すぐ鳴らす
 uv run hourly-chime simulate --hours 24                      # この先の時報を確認
 powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w scripts/install_task.ps1)"
@@ -38,7 +39,7 @@ powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w scripts/install_task.
 削除は `install_task.ps1 -Uninstall`。
 
 空き時間情報しか共有されていないカレンダー (会社アカウント等) は、共有先のアカウントで
-`gas/busy_ics.gs` を Apps Script のウェブアプリとしてデプロイし、その URL を `busy_only: true` で登録する
+`gas/busy_ics.gs` を Apps Script のウェブアプリとしてデプロイし、その URL を secrets.yaml に書いて `busy_only: true` で登録する
 (手順はファイル先頭のコメント)。
 
 ## コマンド
@@ -52,5 +53,6 @@ powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w scripts/install_task.
 | `say TEXT` | 音声確認 |
 
 - 設定: `~/.config/hourly-chime/config.yaml` (書式は `config.example.yaml`)
+- 秘密: `~/.config/hourly-chime/secrets.yaml` (書式は `secrets.example.yaml`、chmod 600)
 - ログ: `~/.local/state/hourly-chime/chime.log`
 - キャッシュ: `~/.cache/hourly-chime/` (ICS・合成済み wav)

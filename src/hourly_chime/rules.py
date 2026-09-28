@@ -99,10 +99,28 @@ def holiday_of(t: datetime, events: list[Event], cfg: Config) -> Event | None:
     return None
 
 
-def events_starting_in(start: datetime, end: datetime, events: list[Event], cfg: Config) -> list[Event]:
-    busy_only = _busy_only(cfg)
-    out = [e for e in events if not e.all_day and e.calendar not in busy_only and start <= e.start < end]
-    return out[: cfg.announce_max]
+def readable_title(e: Event, cfg: Config) -> str | None:
+    """読み上げてよい予定名。busy_only のカレンダーや名前の無い予定は None。"""
+    if e.calendar in _busy_only(cfg) or not e.title:
+        return None
+    return e.title
+
+
+def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Config) -> str:
+    """start <= 開始 < end の予定の案内文。予定名が無い/読めない予定は「予定があります」とだけ言う。
+    同じ時刻に名前のある予定があれば、名前の無い方は省く。"""
+    by_start: dict[datetime, list[Event]] = {}
+    for e in events:
+        if not e.all_day and start <= e.start < end:
+            by_start.setdefault(e.start, []).append(e)
+    lines = []
+    for t in sorted(by_start):
+        titles = [x for x in (readable_title(e, cfg) for e in by_start[t]) if x]
+        if titles:
+            lines += [cfg.announce_template.format(title=x, start=spoken_time(t)) for x in titles]
+        else:
+            lines.append(cfg.announce_untitled_template.format(start=spoken_time(t)))
+    return "".join(lines[: cfg.announce_max])
 
 
 def next_holiday_chime(target: datetime, hours: tuple[int, ...]) -> datetime:
@@ -122,8 +140,7 @@ def _hour_cue(
         return Cue(s.name, at, s.sound, None, f"予定中 ({busy.calendar}: {busy.title})")
     text = s.voice.format(hour=target.hour)
     if announce:
-        for e in events_starting_in(*announce, events, cfg):
-            text += cfg.announce_template.format(title=e.title, calendar=e.calendar, start=spoken_time(e.start))
+        text += announce_text(*announce, events, cfg)
     return Cue(s.name, at, s.sound if s.chime_before_voice else None, text, "読み上げ")
 
 
@@ -160,8 +177,7 @@ def plan_hour(target: datetime, events: list[Event], cfg: Config) -> list[Cue]:
 
 def plan_event(start: datetime, group: list[Event], events: list[Event], cfg: Config) -> list[Cue]:
     """start に始まる予定 (group) に向けた 3 つの Cue。鳴らす時刻に他の予定が入っていれば鳴らさない。"""
-    busy_only = _busy_only(cfg)
-    titles = [e.title for e in group if e.calendar not in busy_only]
+    titles = [x for x in (readable_title(e, cfg) for e in group) if x]
 
     def skip(s: Slot, reason: str) -> Cue:
         return Cue(s.name, start + s.offset, None, None, reason)
@@ -181,7 +197,10 @@ def plan_event(start: datetime, group: list[Event], events: list[Event], cfg: Co
         else:
             text = s.voice.format(start=spoken_time(start))
             if s.offset == timedelta(0):
-                text += "".join(cfg.event_start_template.format(title=t) for t in titles)
+                if titles:
+                    text += "".join(cfg.event_start_template.format(title=t) for t in titles)
+                else:
+                    text += cfg.event_start_untitled_template
             cues.append(Cue(s.name, at, s.sound if s.chime_before_voice else None, text, "予定"))
     return cues
 

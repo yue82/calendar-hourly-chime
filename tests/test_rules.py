@@ -95,12 +95,17 @@ def test_announce_this_hour_at_5min_and_next_hour_on_the_hour():
         ev("roo", "歯医者", at(14, 30), at(15)),
         ev("roo", "ジム", at(15, 10), at(16)),
         ev("roo", "遠い予定", at(16), at(17)),
-        ev("tai", "予定あり", at(15, 30), at(16)),  # 時間枠のみ → 読まない
+        ev("tai", "予定あり", at(15, 30), at(16)),  # 時間枠のみ → 「予定があります」
         ev("roo", "連休", at(0), at(0, day=29), all_day=True),  # 終日 → 無関係
     ]
     s = summary(at(14), events)
     assert s[0] == (None, "14時5分前です。14時30分から、歯医者です。")
-    assert s[3] == ("pipipipoon", "14時です。15時10分から、ジムです。")
+    assert s[3] == ("pipipipoon", "14時です。15時10分から、ジムです。15時30分から、予定があります。")
+
+
+def test_untitled_skipped_when_titled_event_at_same_time():
+    events = [ev("roo", "会議", at(14, 30), at(15)), ev("tai", "予定あり", at(14, 30), at(15)), ev("roo", "", at(14, 45), at(15))]
+    assert summary(at(14), events)[0] == (None, "14時5分前です。14時30分から、会議です。14時45分から、予定があります。")
 
 
 HOLIDAY = Event("holiday", "文化の日", at(0, day=3), at(0, day=4), True, "祝日")
@@ -239,7 +244,7 @@ def test_event_cues_skipped_when_other_event_ongoing():
 
 def test_event_cues_busy_only_no_title():
     t = ev("tai", "予定あり", at(10, 30), at(11))
-    assert plan_event(t.start, [t], [t], CFG)[2].text == "10時30分です。"
+    assert plan_event(t.start, [t], [t], CFG)[2].text == "10時30分です。予定の時間です。"
 
 
 def test_event_cues_suppressed_in_quiet_holiday_and_off():
@@ -280,6 +285,19 @@ def test_example_config_parses_with_all_sections():
 
     from hourly_chime.config import load_config
 
-    cfg = load_config(Path(__file__).parent.parent / "config.example.yaml")
+    root = Path(__file__).parent.parent
+    cfg = load_config(root / "config.example.yaml", root / "secrets.example.yaml")
+    assert [c.url.split("/")[2] for c in cfg.calendars] == ["calendar.google.com", "script.google.com", "calendar.google.com"]
     assert cfg.off is not None and cfg.off.weekdays == {5, 6}
     assert cfg.holiday is not None and cfg.quiet_hours is not None
+
+
+def test_secret_url_overrides_and_missing_url_errors():
+    import pytest
+
+    raw = {"calendars": [{"name": "a", "url": "http://inline"}, {"name": "b"}]}
+    cfg = parse_config(raw, {"calendars": {"a": "http://secret", "b": "http://b"}})
+    assert [c.url for c in cfg.calendars] == ["http://secret", "http://b"]
+    with pytest.raises(ValueError, match="secrets.yaml"):
+        parse_config(raw)
+    assert "http" not in repr(cfg.calendars)

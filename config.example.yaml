@@ -12,14 +12,11 @@
 # 休日は holiday.hours の正時だけ鳴らす。off の日は一切鳴らさない
 timezone: Asia/Tokyo
 
-# Google カレンダー: 設定 > (カレンダー名) > カレンダーの統合 > 「iCal 形式の非公開 URL」
+# url は secrets.yaml の calendars.<name> に書く (公開 URL ならここに url: で書いてもよい)
 calendars:
   - name: private
-    url: https://calendar.google.com/calendar/ical/xxxx%40gmail.com/private-xxxx/basic.ics
   - name: work
-    # 共有カレンダーの時間枠だけなら gas/busy_ics.gs をデプロイした URL でもよい
-    url: https://script.google.com/macros/s/DEPLOYMENT_ID/exec?key=KEY
-    busy_only: true  # 予定名は読まず、時間枠 (予定中かどうか) だけ使う
+    busy_only: true  # 予定名は読まず、時間枠だけ使う (「予定があります」とは知らせる)
   - name: holiday
     url: https://calendar.google.com/calendar/ical/ja.japanese%23holiday%40group.v.calendar.google.com/public/basic.ics
 
@@ -44,7 +41,10 @@ off_days:
 
 announce:
   template: "{start}から、{title}です。"  # 5分前・正時の予定案内。変数: {start} {title} {calendar}
-  event_start_template: "{title}です。"  # 予定開始時。busy_only のカレンダーでは読まない
+  event_start_template: "{title}です。"  # 予定開始時
+  # 予定名が無い / busy_only の予定
+  untitled_template: "{start}から、予定があります。"
+  event_start_untitled_template: "予定の時間です。"
   max_items: 3
 
 tts:
