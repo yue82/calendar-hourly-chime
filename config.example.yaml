@@ -1,15 +1,11 @@
 # ~/.config/hourly-chime/config.yaml にコピーして使う
 #
-# 毎時、正時 N:00 に向けて次のタイミングで鳴らす (N:00 に始まる予定が無ければ正時のみ):
-#   5分前   「N時5分前です。」+ N時台に始まる予定
-#   2分前   「2分前です。」
-#   15秒前  「15秒前です。」
-#   正時    ピピピポーン「N時です。」+ N+1時台に始まる予定
-# 鳴らす時刻に予定 (終日予定を除く) が入っていれば、読み上げずに音だけ鳴らす:
-#   ポポポポポ / ポポ / ポーン / ピピピポーン
-# 正時始まりでない予定には、その 2分前・15秒前・開始時に鳴らす
-#   (鳴らす時刻に他の予定が入っていれば鳴らさない)
-# 休日は holiday.hours の正時だけ鳴らす。off の日は一切鳴らさない
+# 時報: 平日は毎正時、休日は holiday.hours の正時に ピピピポーン「N時です。」+ 次にある予定
+#   (平日は N+1時台、休日は次の時報までに始まる予定)
+# 予定通知: 平日・休日とも、予定の 5分前・2分前・15秒前・開始時 (ピポーン) に読み上げ。時報と重なったら時報優先
+# 鳴らす時刻に (他の) 予定が入っていれば、読み上げずに音だけ鳴らす:
+#   時報 ピピピポーン / 予定通知 ポポポポポ・ポポ・ポーン・ピポーン
+# カウントダウン: countdown: true のカレンダーとコマンドで指定。時報・予定通知とは独立
 timezone: Asia/Tokyo
 
 # url は secrets.yaml の calendars.<name> に書く (公開 URL ならここに url: で書いてもよい)
@@ -18,41 +14,37 @@ calendars:
   - name: work
     busy_only: true  # 予定名は読まず、時間枠だけ使う (「予定があります」とは知らせる)
   - name: countdown
-    countdown: true  # カウントダウン専用: 全予定の開始時刻に向けてカウントダウン。時報の判定には使わない
+    countdown: true  # カウントダウン専用: 全予定の開始時刻に向けてカウントダウン。時報・予定通知には使わない
   - name: holiday
     url: https://calendar.google.com/calendar/ical/ja.japanese%23holiday%40group.v.calendar.google.com/public/basic.ics
 
 refresh_minutes: 4  # この時間以内に取得したキャッシュはそのまま使う (5 分ごとに起動)
 
-quiet_hours:  # 正時がこの範囲なら鳴らさない (日付またぎ可)
+quiet_hours:  # 平日はこの範囲の時報・予定通知を鳴らさない (日付またぎ可)
   start: "21:00"
   end: "08:00"
 
-# 休日 (calendar に条件に合う終日予定がある日) は hours の正時だけ鳴らし、
-# 次の時報までに始まる予定を読む。quiet_hours より優先。
+# 休日 (weekdays の曜日、または all_day の条件に合う終日予定がある日) は hours の正時だけ時報を鳴らす。
+# quiet_hours より優先。
 holiday:
-  calendar: holiday
-  description: "^祝日"  # Google の日本の祝日は、祭日 (クリスマス・銀行休業日等) の説明が「祭日」
   hours: [8, 12, 16, 20]
-
-# 一切鳴らさない日: 指定曜日、または calendar に title (正規表現) に合う終日予定がある日
-off_days:
   weekdays: [sat, sun]
-  calendar: private
-  title: "有休|有給|休暇|年休|休み|全休|休日|休業"
+  all_day:
+    - calendar: holiday
+      description: "^祝日"  # Google の日本の祝日は、祭日 (クリスマス・銀行休業日等) の説明が「祭日」
+    - calendar: private
+      title: "有休|有給|休暇|年休|休み|全休|休日|休業"
 
-# カウントダウン: 指定時刻に向けて offsets 分前に「H時M分まで、あとN分です。」、時刻にピピピポーン。
-# quiet_hours・休日・off_days に関係なく鳴らし、重なった時報より優先する。
+# カウントダウン: 指定時刻に向けて offsets 分前に「H時M分まで、あとN分です。」、時刻にピポーン。
+# quiet_hours・休日に関係なく鳴らし、重なった時報・予定通知より優先する。
 #   コマンド: hourly-chime countdown 15:30 / 1530 / +45  [--offsets 30,10,5]
-#   カレンダー: countdown: true のカレンダーの予定、または予定名が title に合う予定 (例: 「⏰出発」) の開始時刻
+#   カレンダー: countdown: true のカレンダーの予定の開始時刻
 countdown:
   offsets: [30, 20, 10, 5, 2, 1]
-  title: "^⏰"
-  # calendar: roo  # title を見るカレンダーを絞る場合
 
 announce:
-  template: "{start}から、{title}です。"  # 5分前・正時の予定案内。変数: {start} {title} {calendar}
-  event_start_template: "{title}です。"  # 予定開始時
+  template: "{start}から、{title}です。"  # 時報・予定通知5分前の案内。変数: {start} {title}
+  event_start_template: "{title}です。"  # 予定通知の開始時
   # 予定名が無い / busy_only の予定
   untitled_template: "{start}から、予定があります。"
   event_start_untitled_template: "予定の時間です。"

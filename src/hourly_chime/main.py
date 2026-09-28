@@ -175,18 +175,22 @@ def cmd_countdown_play(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_demo(args: argparse.Namespace, cfg: Config) -> int:
-    """次の正時の 4 つのタイミングを、間を詰めて今すぐ鳴らす (鳴らさない時間帯・休日は無視)。"""
-    cfg = replace(cfg, quiet_hours=None, holiday=None, off=None)
-    target = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else next_target(
-        datetime.now(cfg.timezone)
-    )
-    plans = rules.plan_hour(target, chime_events(get_events(cfg, target, 3, refresh=False), cfg), cfg)
+    """時報・予定通知・カウントダウンの音と読み上げを、間を詰めて今すぐ鳴らす。"""
+    cfg = replace(cfg, quiet_hours=None, holiday=None)
+    now = datetime.now(cfg.timezone)
+    target = next_target(now)
+    sample = ical.Event("demo", "テスト", target + timedelta(minutes=30), target + timedelta(minutes=60), False)
+    cues = [rules.plan_hour(target, [], cfg)]
+    cues += rules.plan_event(sample.start, [sample], [sample], cfg)
+    cues += countdown.cues_of(countdown.Countdown(target, (5, 1)))
     if args.sound_only:
-        plans = [replace(p, sound=s.sound, text=None, reason="sound-only") for p, s in zip(plans, rules.HOUR_SLOTS)]
+        slot_sound = {s.name: s.sound for s in (rules.HOUR_SLOT, *rules.EVENT_SLOTS)} | {"CD時刻": "pipoon"}
+        cues = [replace(c, sound=slot_sound.get(c.label), text=None, reason="sound-only") for c in cues]
+        cues = [c for c in cues if not c.silent]
     rendered = []
-    for p in plans:
-        print(describe(p))
-        rendered.append((render(p, cfg)[0], p.label))
+    for c in cues:
+        print(describe(c))
+        rendered.append((render(c, cfg)[0], c.label))
     items = []
     t = time.time() + 2  # PowerShell の起動待ち
     for wav, name in rendered:
@@ -237,8 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--at", help="この時刻に起動したとして判定する (例: 2026-09-28T13:54)")
     c.set_defaults(func=cmd_chime)
 
-    d = sub.add_parser("demo", help="次の正時の時報を間を詰めて今すぐ鳴らす")
-    d.add_argument("--at", help="この正時として判定する")
+    d = sub.add_parser("demo", help="時報・予定通知・カウントダウンを間を詰めて今すぐ鳴らす")
     d.add_argument("--sound-only", action="store_true", help="予定中 (音のみ) の場合を鳴らす")
     d.set_defaults(func=cmd_demo)
 

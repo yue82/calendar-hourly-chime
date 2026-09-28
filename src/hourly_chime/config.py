@@ -27,7 +27,7 @@ class CalendarSource:
     name: str
     url: str = field(repr=False)  # 非公開 URL を含むことがあるので repr に出さない
     busy_only: bool = False  # 予定名は読まず、時間枠 (予定中かどうか) だけ使う
-    countdown: bool = False  # カウントダウン専用 (全予定をカウントダウンにし、予定中扱いしない)
+    countdown: bool = False  # カウントダウン専用 (全予定をカウントダウンにし、時報・予定通知には使わない)
 
 
 @dataclass(frozen=True)
@@ -42,48 +42,39 @@ class QuietHours:
         return t >= self.start or t < self.end
 
 
-@dataclass(frozen=True)
-class HolidayMode:
-    """休日 (指定カレンダーに条件に合う終日予定がある日) は指定の正時だけ鳴らす。"""
-
-    calendars: tuple[str, ...]
-    hours: tuple[int, ...]
-    title: re.Pattern[str] | None = None
-    description: re.Pattern[str] | None = None
-
-
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
             "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6}
 
 
 @dataclass(frozen=True)
-class OffDays:
-    """一切鳴らさない日: 指定曜日、またはタイトルが条件に合う終日予定がある日。"""
+class AllDayMatcher:
+    """この条件に合う終日予定がある日を休日にする。条件は AND、省略は無条件。"""
 
-    weekdays: frozenset[int] = frozenset()
+    calendar: str
     title: re.Pattern[str] | None = None
-    calendars: tuple[str, ...] | None = None  # title を見るカレンダー (None なら全て)
+    description: re.Pattern[str] | None = None
+
+    def matches(self, e: Any) -> bool:
+        return (
+            e.calendar == self.calendar
+            and (self.title is None or bool(self.title.search(e.title)))
+            and (self.description is None or bool(self.description.search(e.description)))
+        )
+
+
+@dataclass(frozen=True)
+class HolidayMode:
+    """休日 (指定曜日、または matchers に合う終日予定がある日) は hours の正時だけ時報を鳴らす。"""
+
+    hours: tuple[int, ...]
+    weekdays: frozenset[int] = frozenset()
+    matchers: tuple[AllDayMatcher, ...] = ()
 
 
 @dataclass(frozen=True)
 class CountdownConfig:
     offsets: tuple[int, ...] = (30, 20, 10, 5, 2, 1)  # 分前
-    title: re.Pattern[str] | None = None  # この予定名の開始時刻に向けてカウントダウン
-    calendars: tuple[str, ...] | None = None  # title を見るカレンダー (None なら全て)
     dedicated: frozenset[str] = frozenset()  # countdown: true のカレンダー (全予定が対象)
-
-    def matches(self, e: Any) -> bool:
-        if e.calendar in self.dedicated:
-            return True
-        return (
-            self.title is not None
-            and (self.calendars is None or e.calendar in self.calendars)
-            and bool(self.title.search(e.title))
-        )
-
-    def strip(self, title: str) -> str:
-        """読み上げ用に印を外す。"""
-        return self.title.sub("", title, count=1).strip() if self.title else title
 
 
 @dataclass(frozen=True)
@@ -103,7 +94,6 @@ class Config:
     refresh_minutes: int = 10
     quiet_hours: QuietHours | None = None
     holiday: HolidayMode | None = None
-    off: OffDays | None = None
     countdown: CountdownConfig = field(default_factory=CountdownConfig)
     announce_template: str = "{start}から、{title}です。"
     event_start_template: str = "{title}です。"
@@ -150,39 +140,28 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
     hd = raw.get("holiday")
     holiday = None
     if hd:
-        cals = hd["calendar"]
-        holiday = HolidayMode(
-            calendars=(cals,) if isinstance(cals, str) else tuple(cals),
-            hours=tuple(sorted(hd["hours"])),
-            title=re.compile(hd["title"]) if hd.get("title") else None,
-            description=re.compile(hd["description"]) if hd.get("description") else None,
+        try:
+            weekdays = frozenset(WEEKDAYS[str(w).lower()] for w in hd.get("weekdays") or [])
+        except KeyError as e:
+            raise ValueError(f"holiday.weekdays に不明な曜日: {e}") from None
+        matchers = tuple(
+            AllDayMatcher(
+                calendar=m["calendar"],
+                title=re.compile(m["title"]) if m.get("title") else None,
+                description=re.compile(m["description"]) if m.get("description") else None,
+            )
+            for m in hd.get("all_day") or []
         )
+        holiday = HolidayMode(hours=tuple(sorted(hd.get("hours") or [])), weekdays=weekdays, matchers=matchers)
         if not holiday.hours:
             raise ValueError("holiday.hours が空です")
-        unknown = set(holiday.calendars) - set(names)
+        unknown = {m.calendar for m in matchers} - set(names)
         if unknown:
-            raise ValueError(f"holiday.calendar に未定義のカレンダー: {sorted(unknown)}")
-
-    od = raw.get("off_days")
-    off = None
-    if od:
-        try:
-            weekdays = frozenset(WEEKDAYS[str(w).lower()] for w in od.get("weekdays") or [])
-        except KeyError as e:
-            raise ValueError(f"off_days.weekdays に不明な曜日: {e}") from None
-        cals = od.get("calendar")
-        off = OffDays(
-            weekdays=weekdays,
-            title=re.compile(od["title"]) if od.get("title") else None,
-            calendars=None if cals is None else ((cals,) if isinstance(cals, str) else tuple(cals)),
-        )
+            log.warning("holiday.all_day に読めないカレンダー: %s", sorted(unknown))
 
     cd = raw.get("countdown") or {}
-    cd_cals = cd.get("calendar")
     countdown = CountdownConfig(
         offsets=tuple(cd.get("offsets") or CountdownConfig.offsets),
-        title=re.compile(cd["title"]) if cd.get("title") else None,
-        calendars=None if cd_cals is None else ((cd_cals,) if isinstance(cd_cals, str) else tuple(cd_cals)),
         dedicated=frozenset(c.name for c in calendars if c.countdown),
     )
 
@@ -205,7 +184,6 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         refresh_minutes=raw.get("refresh_minutes", 10),
         quiet_hours=quiet,
         holiday=holiday,
-        off=off,
         countdown=countdown,
         announce_template=an.get("template", Config.announce_template),
         event_start_template=an.get("event_start_template", Config.event_start_template),

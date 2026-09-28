@@ -2,7 +2,7 @@
 
 指定方法は 2 つ:
 - コマンド (`hourly-chime countdown 15:30`): STATE_DIR/countdowns.json に保存する
-- カレンダー: タイトルが countdown.title に合う予定の開始時刻
+- カレンダー: countdown: true のカレンダーの予定の開始時刻 (時報・予定通知とは独立)
 
 quiet_hours / 休日 / off_days に関係なく鳴らし、重なった時報より優先する。
 """
@@ -40,16 +40,16 @@ def cues_of(cd: Countdown) -> list[Cue]:
         Cue(f"CD{m}分前", cd.at - timedelta(minutes=m), None, f"{t}まで、あと{m}分です。", reason)
         for m in sorted(set(cd.offsets), reverse=True)
     ]
-    out.append(Cue("CD時刻", cd.at, "pipipipoon", f"{t}です。", reason))
+    out.append(Cue("CD時刻", cd.at, "pipoon", f"{t}です。", reason))
     return out
 
 
 def from_events(events: list[Event], cfg: Config) -> list[Countdown]:
-    cc = cfg.countdown
+    """カウントダウン専用カレンダーの予定の開始時刻。"""
     return [
-        Countdown(e.start, cc.offsets, source=f"{e.calendar}: {e.title}")
+        Countdown(e.start, cfg.countdown.offsets, source=f"{e.calendar}: {e.title}")
         for e in events
-        if not e.all_day and cc.matches(e)
+        if not e.all_day and e.calendar in cfg.countdown.dedicated
     ]
 
 
