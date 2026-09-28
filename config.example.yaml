@@ -7,6 +7,7 @@
 #   正時    ピピピポーン「N時です。」+ N+1時台に始まる予定
 # 鳴らす時刻に予定 (終日予定を除く) が入っていれば、読み上げずに音だけ鳴らす:
 #   ポポポポポ / ポポ / ポーン / ピピピポーン
+# 休日は holiday.hours の正時だけ鳴らす
 timezone: Asia/Tokyo
 
 # Google カレンダー: 設定 > (カレンダー名) > カレンダーの統合 > 「iCal 形式の非公開 URL」
@@ -18,13 +19,19 @@ calendars:
     busy_only: true  # 予定名は読まず、時間枠 (予定中かどうか) だけ使う
   - name: holiday
     url: https://calendar.google.com/calendar/ical/ja.japanese%23holiday%40group.v.calendar.google.com/public/basic.ics
-    mute_all_day: true  # 終日予定 (祝日) がある日は一切鳴らさない
 
 refresh_minutes: 10  # この時間以内に取得したキャッシュはそのまま使う
 
 quiet_hours:  # 正時がこの範囲なら鳴らさない (日付またぎ可)
   start: "20:00"
   end: "08:00"
+
+# 休日 (calendar に条件に合う終日予定がある日) は hours の正時だけ鳴らし、
+# 次の時報までに始まる予定を読む。quiet_hours より優先。
+holiday:
+  calendar: holiday
+  description: "^祝日"  # Google の日本の祝日は、祭日 (クリスマス・銀行休業日等) の説明が「祭日」
+  hours: [8, 12, 16, 20]
 
 announce:
   template: "{start}から、{title}です。"  # 使える変数: {start} {title} {calendar}

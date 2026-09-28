@@ -88,10 +88,8 @@ def cmd_chime(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_demo(args: argparse.Namespace, cfg: Config) -> int:
-    """次の正時の 4 つのタイミングを、間を詰めて今すぐ鳴らす (鳴らさない時間帯は無視)。"""
-    cfg = replace(
-        cfg, quiet_hours=None, calendars=tuple(replace(c, mute_all_day=False) for c in cfg.calendars)
-    )
+    """次の正時の 4 つのタイミングを、間を詰めて今すぐ鳴らす (鳴らさない時間帯・休日は無視)。"""
+    cfg = replace(cfg, quiet_hours=None, holiday=None)
     target = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else next_target(
         datetime.now(cfg.timezone)
     )

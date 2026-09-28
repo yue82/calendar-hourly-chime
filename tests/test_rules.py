@@ -13,9 +13,10 @@ CFG = parse_config(
         "calendars": [
             {"name": "roo", "url": "x"},
             {"name": "tai", "url": "y", "busy_only": True},
-            {"name": "holiday", "url": "z", "mute_all_day": True},
+            {"name": "holiday", "url": "z"},
         ],
         "quiet_hours": {"start": "20:00", "end": "08:00"},
+        "holiday": {"calendar": "holiday", "description": "^祝日", "hours": [8, 12, 16, 20]},
     }
 )
 
@@ -101,9 +102,47 @@ def test_announce_this_hour_at_5min_and_next_hour_on_the_hour():
     assert s[3] == ("pipipipoon", "14時です。15時10分から、ジムです。")
 
 
-def test_mute_all_day_calendar():
-    events = [ev("holiday", "祝日", at(0), at(0, day=29), all_day=True)]
-    assert all(p.silent for p in plan_hour(at(14), events, CFG))
+HOLIDAY = Event("holiday", "文化の日", at(0, day=3), at(0, day=4), True, "祝日")
+
+
+def hat(h: int, m: int = 0, day: int = 3) -> datetime:
+    return at(h, m, day=day)
+
+
+def test_holiday_only_on_listed_hours_and_on_the_hour():
+    assert all(p.silent for p in plan_hour(hat(9), [HOLIDAY], CFG))
+    assert all(p.silent for p in plan_hour(hat(13), [HOLIDAY], CFG))
+    s = summary(hat(12), [HOLIDAY])
+    assert s == [(None, None), (None, None), (None, None), ("pipipipoon", "12時です。")]
+
+
+def test_holiday_overrides_quiet_hours():
+    assert summary(hat(20), [HOLIDAY])[3] == ("pipipipoon", "20時です。")
+
+
+def test_holiday_announces_until_next_chime():
+    events = [
+        HOLIDAY,
+        ev("roo", "ランチ", hat(12, 30), hat(13, 30)),
+        ev("roo", "買い物", hat(15, 50), hat(17)),
+        ev("roo", "夕飯", hat(16), hat(17)),  # 次の時報 (16時) 以降 → 読まない
+    ]
+    assert summary(hat(12), events)[3] == ("pipipipoon", "12時です。12時30分から、ランチです。15時50分から、買い物です。")
+    # 20時の次は翌朝 8 時まで
+    late = [HOLIDAY, ev("roo", "早朝", hat(7, day=4), hat(8, day=4)), ev("roo", "朝会", hat(8, day=4), hat(9, day=4))]
+    assert summary(hat(20), late)[3] == ("pipipipoon", "20時です。7時から、早朝です。")
+
+
+def test_holiday_busy_is_sound_only():
+    events = [HOLIDAY, ev("tai", "予定あり", hat(11), hat(13))]
+    assert summary(hat(12), events)[3] == ("pipipipoon", None)
+
+
+def test_holiday_description_filter():
+    # 祭日 (クリスマス等) は休日扱いしない
+    xmas = ev("holiday", "クリスマス", at(0, day=25), at(0, day=26), all_day=True)
+    xmas = Event(xmas.calendar, xmas.title, xmas.start, xmas.end, True, "祭日\n祭日を非表示にするには…")
+    assert not any(p.silent for p in plan_hour(at(14, day=25), [xmas], CFG))
 
 
 def test_next_target():

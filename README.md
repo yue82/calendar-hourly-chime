@@ -13,7 +13,8 @@ Google カレンダー (iCal) と連動する音声時報。WSL2 + Windows 用�
 
 - 「予定中」= その時刻に終日以外の予定が入っている (全カレンダー対象)
 - `busy_only` のカレンダーは予定名を読まず、時間枠の判定だけに使う
-- `mute_all_day` のカレンダーに終日予定がある日 (祝日など) と `quiet_hours` は一切鳴らさない
+- `quiet_hours` の間は鳴らさない
+- 休日 (`holiday` のカレンダーに条件に合う終日予定がある日) は `holiday.hours` の正時だけ、ピピピポーン「N時です。」+ 次の時報までに始まる予定 (`quiet_hours` より優先)
 
 ```
 タスクスケジューラ (毎時 54:30) → conhost --headless wsl.exe → hourly-chime chime

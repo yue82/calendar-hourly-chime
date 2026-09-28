@@ -26,6 +26,7 @@ class Event:
     start: datetime
     end: datetime
     all_day: bool
+    description: str = ""
 
     def is_ongoing(self, t: datetime) -> bool:
         return self.start <= t < self.end
@@ -88,6 +89,7 @@ def parse_events(
                 start=s,
                 end=e,
                 all_day=all_day,
+                description=str(comp.get("DESCRIPTION", "")).strip(),
             )
         )
     return events

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import time
 from pathlib import Path
@@ -23,7 +24,6 @@ class CalendarSource:
     name: str
     url: str
     busy_only: bool = False  # 予定名は読まず、時間枠 (予定中かどうか) だけ使う
-    mute_all_day: bool = False  # このカレンダーに終日予定がある日は鳴らさない (祝日など)
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,16 @@ class QuietHours:
             return self.start <= t < self.end
         # 日付をまたぐ (例: 23:00-07:00)
         return t >= self.start or t < self.end
+
+
+@dataclass(frozen=True)
+class HolidayMode:
+    """休日 (指定カレンダーに条件に合う終日予定がある日) は指定の正時だけ鳴らす。"""
+
+    calendars: tuple[str, ...]
+    hours: tuple[int, ...]
+    title: re.Pattern[str] | None = None
+    description: re.Pattern[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +64,7 @@ class Config:
     calendars: tuple[CalendarSource, ...] = ()
     refresh_minutes: int = 10
     quiet_hours: QuietHours | None = None
+    holiday: HolidayMode | None = None
     announce_template: str = "{start}から、{title}です。"
     announce_max: int = 3
     tts: TTSConfig = field(default_factory=TTSConfig)
@@ -73,7 +84,6 @@ def parse_config(raw: dict[str, Any]) -> Config:
             name=c["name"],
             url=c["url"],
             busy_only=bool(c.get("busy_only", False)),
-            mute_all_day=bool(c.get("mute_all_day", False)),
         )
         for c in raw.get("calendars") or []
     )
@@ -83,6 +93,22 @@ def parse_config(raw: dict[str, Any]) -> Config:
 
     qh = raw.get("quiet_hours")
     quiet = QuietHours(_time(qh["start"]), _time(qh["end"])) if qh else None
+
+    hd = raw.get("holiday")
+    holiday = None
+    if hd:
+        cals = hd["calendar"]
+        holiday = HolidayMode(
+            calendars=(cals,) if isinstance(cals, str) else tuple(cals),
+            hours=tuple(sorted(hd["hours"])),
+            title=re.compile(hd["title"]) if hd.get("title") else None,
+            description=re.compile(hd["description"]) if hd.get("description") else None,
+        )
+        if not holiday.hours:
+            raise ValueError("holiday.hours が空です")
+        unknown = set(holiday.calendars) - set(names)
+        if unknown:
+            raise ValueError(f"holiday.calendar に未定義のカレンダー: {sorted(unknown)}")
 
     an = raw.get("announce") or {}
     t = raw.get("tts") or {}
@@ -102,6 +128,7 @@ def parse_config(raw: dict[str, Any]) -> Config:
         calendars=calendars,
         refresh_minutes=raw.get("refresh_minutes", 10),
         quiet_hours=quiet,
+        holiday=holiday,
         announce_template=an.get("template", Config.announce_template),
         announce_max=an.get("max_items", Config.announce_max),
         tts=tts,
