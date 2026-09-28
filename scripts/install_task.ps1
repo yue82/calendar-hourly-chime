@@ -20,13 +20,14 @@ if ($Uninstall) {
 $args_ = "--headless wsl.exe -d $Distro --cd $RepoDir -e $RepoDir/.venv/bin/hourly-chime chime"
 $action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument $args_
 
-# Every hour at xx:54:30 (the process then waits for the 5min/2min/15s/0s cues), repeating indefinitely
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(54).AddSeconds(30) -RepetitionInterval (New-TimeSpan -Hours 1)
+# Every 5 minutes at xx:x4:00 / xx:x9:00; each run plays the cues in the following 5 minutes
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(4) -RepetitionInterval (New-TimeSpan -Minutes 5)
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
-    -MultipleInstances IgnoreNew
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 8) `
+    -MultipleInstances Parallel
+# Parallel: a run may still be playing its last cue when the next one starts
 # Do not catch up on chimes missed while asleep
 $settings.StartWhenAvailable = $false
 

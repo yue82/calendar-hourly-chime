@@ -48,6 +48,19 @@ class HolidayMode:
     description: re.Pattern[str] | None = None
 
 
+WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+            "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6}
+
+
+@dataclass(frozen=True)
+class OffDays:
+    """一切鳴らさない日: 指定曜日、またはタイトルが条件に合う終日予定がある日。"""
+
+    weekdays: frozenset[int] = frozenset()
+    title: re.Pattern[str] | None = None
+    calendars: tuple[str, ...] | None = None  # title を見るカレンダー (None なら全て)
+
+
 @dataclass(frozen=True)
 class TTSConfig:
     engine: str = "sapi"  # sapi | voicevox
@@ -65,7 +78,9 @@ class Config:
     refresh_minutes: int = 10
     quiet_hours: QuietHours | None = None
     holiday: HolidayMode | None = None
+    off: OffDays | None = None
     announce_template: str = "{start}から、{title}です。"
+    event_start_template: str = "{title}です。"
     announce_max: int = 3
     tts: TTSConfig = field(default_factory=TTSConfig)
     player: str = "windows"  # windows | paplay
@@ -110,6 +125,20 @@ def parse_config(raw: dict[str, Any]) -> Config:
         if unknown:
             raise ValueError(f"holiday.calendar に未定義のカレンダー: {sorted(unknown)}")
 
+    od = raw.get("off_days")
+    off = None
+    if od:
+        try:
+            weekdays = frozenset(WEEKDAYS[str(w).lower()] for w in od.get("weekdays") or [])
+        except KeyError as e:
+            raise ValueError(f"off_days.weekdays に不明な曜日: {e}") from None
+        cals = od.get("calendar")
+        off = OffDays(
+            weekdays=weekdays,
+            title=re.compile(od["title"]) if od.get("title") else None,
+            calendars=None if cals is None else ((cals,) if isinstance(cals, str) else tuple(cals)),
+        )
+
     an = raw.get("announce") or {}
     t = raw.get("tts") or {}
     sapi = t.get("sapi") or {}
@@ -129,7 +158,9 @@ def parse_config(raw: dict[str, Any]) -> Config:
         refresh_minutes=raw.get("refresh_minutes", 10),
         quiet_hours=quiet,
         holiday=holiday,
+        off=off,
         announce_template=an.get("template", Config.announce_template),
+        event_start_template=an.get("event_start_template", Config.event_start_template),
         announce_max=an.get("max_items", Config.announce_max),
         tts=tts,
         player=raw.get("player", "windows"),

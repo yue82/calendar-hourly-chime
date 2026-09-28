@@ -3,8 +3,8 @@ from zoneinfo import ZoneInfo
 
 from hourly_chime.config import parse_config
 from hourly_chime.ical import Event, parse_events
-from hourly_chime.main import next_target
-from hourly_chime.rules import plan_hour
+from hourly_chime.main import next_target, window_of
+from hourly_chime.rules import plan_event, plan_hour, plan_window
 
 TZ = ZoneInfo("Asia/Tokyo")
 
@@ -17,6 +17,7 @@ CFG = parse_config(
         ],
         "quiet_hours": {"start": "20:00", "end": "08:00"},
         "holiday": {"calendar": "holiday", "description": "^祝日", "hours": [8, 12, 16, 20]},
+        "off_days": {"weekdays": ["sat", "sun"], "calendar": "roo", "title": "有休|休暇|休み"},
     }
 )
 
@@ -190,3 +191,95 @@ def test_parse_ics_recurring_allday_cancelled():
     off = titles["有給"]
     assert off.all_day and off.start == at(0) and off.end == at(0, day=29)
     assert plan_hour(at(15), events, CFG)[0].sound == "popopopopo"  # 14:55 は週次MTG中
+
+
+# --- 休み (曜日・タイトル) ---
+
+
+def test_weekend_is_off_even_on_holiday():
+    sat = at(12, day=26)  # 2026-09-26 は土曜
+    assert all(p.silent for p in plan_hour(sat, [], CFG))
+    hol_sat = Event("holiday", "祝日", at(0, day=26), at(0, day=27), True, "祝日")
+    assert all(p.silent for p in plan_hour(sat, [hol_sat], CFG))
+
+
+def test_off_title_on_roo_only():
+    vac = ev("roo", "会社年末有休取得日", at(0), at(0, day=29), all_day=True)
+    assert all(p.silent for p in plan_hour(at(14), [vac], CFG))
+    other = ev("tai", "休み", at(0), at(0, day=29), all_day=True)  # roo 以外は見ない
+    assert not any(p.silent for p in plan_hour(at(14), [other], CFG))
+
+
+def test_off_title_only_all_day():
+    # 時間指定の「昼休み」などは休み扱いしない (普通の予定として音のみ)
+    lunch = ev("roo", "昼休み", at(11, 30), at(12, 30))
+    assert summary(at(12), [lunch])[3] == ("pipipipoon", None)
+
+
+# --- 正時始まりでない予定 ---
+
+
+def test_event_cues():
+    gym = ev("roo", "ジム", at(19, 25), at(19, 45))
+    cues = plan_event(gym.start, [gym], [gym], CFG)
+    assert [(c.at, c.sound, c.text) for c in cues] == [
+        (at(19, 23), None, "2分前です。"),
+        (at(19, 24, 45), None, "15秒前です。"),
+        (at(19, 25), "pipipipoon", "19時25分です。ジムです。"),
+    ]
+
+
+def test_event_cues_skipped_when_other_event_ongoing():
+    a = ev("roo", "A", at(14), at(14, 30))
+    b = ev("roo", "B", at(14, 30), at(15))  # 14:28, 14:29:45 は A の最中、14:30 は A 終了
+    cues = plan_event(b.start, [b], [a, b], CFG)
+    assert [c.silent for c in cues] == [True, True, False]
+    assert cues[2].text == "14時30分です。Bです。"
+
+
+def test_event_cues_busy_only_no_title():
+    t = ev("tai", "予定あり", at(10, 30), at(11))
+    assert plan_event(t.start, [t], [t], CFG)[2].text == "10時30分です。"
+
+
+def test_event_cues_suppressed_in_quiet_holiday_and_off():
+    late = ev("roo", "夜", at(22, 30), at(23))
+    assert all(c.silent for c in plan_event(late.start, [late], [late], CFG))
+    sat = ev("roo", "土曜", at(10, 30, day=26), at(11, day=26))
+    assert all(c.silent for c in plan_event(sat.start, [sat], [sat], CFG))
+    hol = [HOLIDAY, ev("roo", "祝日の予定", hat(10, 30), hat(11))]
+    assert all(c.silent for c in plan_event(hol[1].start, [hol[1]], hol, CFG))
+
+
+# --- 5 分ごとの受け持ち ---
+
+
+def test_window_of():
+    assert window_of(at(13, 54)) == (at(13, 54, 30), at(13, 59, 30))
+    assert window_of(at(13, 54, 3)) == (at(13, 54, 30), at(13, 59, 30))
+    assert window_of(at(13, 53, 40)) == (at(13, 54, 30), at(13, 59, 30))  # 少し早い起動
+    assert window_of(at(13, 59)) == (at(13, 59, 30), at(14, 4, 30))
+
+
+def test_plan_window_partitions_all_cues():
+    events = [ev("roo", "ジム", at(14, 1), at(14, 30)), ev("roo", "会議", at(14, 57), at(15, 30))]
+    start = at(13, 54, 30)
+    got = []
+    for i in range(14):  # 13:54:30 から 70 分
+        s, e = window_of(start + timedelta(minutes=5 * i) - timedelta(seconds=30))
+        got += [(c.at, c.label) for c in plan_window(s, e, events, CFG) if not c.silent]
+    assert got == sorted(got) and len(got) == len(set(got))
+    assert (at(13, 59, 45), "15秒前") in got and (at(14), "正時") in got
+    assert (at(13, 59), "予定2分前") in got and (at(14, 1), "予定開始") in got
+    assert (at(14, 55), "予定2分前") in got and (at(14, 57), "予定開始") in got
+
+
+def test_example_config_parses_with_all_sections():
+    # YAML 1.1 の罠 (off/on/yes/no が bool になる等) を実ファイルで検出する
+    from pathlib import Path
+
+    from hourly_chime.config import load_config
+
+    cfg = load_config(Path(__file__).parent.parent / "config.example.yaml")
+    assert cfg.off is not None and cfg.off.weekdays == {5, 6}
+    assert cfg.holiday is not None and cfg.quiet_hours is not None
