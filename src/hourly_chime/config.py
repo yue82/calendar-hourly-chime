@@ -27,6 +27,7 @@ class CalendarSource:
     name: str
     url: str = field(repr=False)  # 非公開 URL を含むことがあるので repr に出さない
     busy_only: bool = False  # 予定名は読まず、時間枠 (予定中かどうか) だけ使う
+    countdown: bool = False  # カウントダウン専用 (全予定をカウントダウンにし、予定中扱いしない)
 
 
 @dataclass(frozen=True)
@@ -69,8 +70,11 @@ class CountdownConfig:
     offsets: tuple[int, ...] = (30, 20, 10, 5, 2, 1)  # 分前
     title: re.Pattern[str] | None = None  # この予定名の開始時刻に向けてカウントダウン
     calendars: tuple[str, ...] | None = None  # title を見るカレンダー (None なら全て)
+    dedicated: frozenset[str] = frozenset()  # countdown: true のカレンダー (全予定が対象)
 
     def matches(self, e: Any) -> bool:
+        if e.calendar in self.dedicated:
+            return True
         return (
             self.title is not None
             and (self.calendars is None or e.calendar in self.calendars)
@@ -124,8 +128,17 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
     for c in raw.get("calendars") or []:
         url = secret_urls.get(c["name"]) or c.get("url")
         if not url:
-            raise ValueError(f"カレンダー {c['name']} の url がありません (secrets.yaml の calendars.{c['name']} に書く)")
-        calendars.append(CalendarSource(name=c["name"], url=url, busy_only=bool(c.get("busy_only", False))))
+            # 時報自体は止めない
+            log.warning("カレンダー %s の url がありません (secrets.yaml の calendars.%s に書く)。スキップします", c["name"], c["name"])
+            continue
+        calendars.append(
+            CalendarSource(
+                name=c["name"],
+                url=url,
+                busy_only=bool(c.get("busy_only", False)),
+                countdown=bool(c.get("countdown", False)),
+            )
+        )
     calendars = tuple(calendars)
     names = [c.name for c in calendars]
     if len(set(names)) != len(names):
@@ -170,6 +183,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         offsets=tuple(cd.get("offsets") or CountdownConfig.offsets),
         title=re.compile(cd["title"]) if cd.get("title") else None,
         calendars=None if cd_cals is None else ((cd_cals,) if isinstance(cd_cals, str) else tuple(cd_cals)),
+        dedicated=frozenset(c.name for c in calendars if c.countdown),
     )
 
     an = raw.get("announce") or {}

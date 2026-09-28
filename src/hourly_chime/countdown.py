@@ -46,8 +46,6 @@ def cues_of(cd: Countdown) -> list[Cue]:
 
 def from_events(events: list[Event], cfg: Config) -> list[Countdown]:
     cc = cfg.countdown
-    if cc is None or cc.title is None:
-        return []
     return [
         Countdown(e.start, cc.offsets, source=f"{e.calendar}: {e.title}")
         for e in events

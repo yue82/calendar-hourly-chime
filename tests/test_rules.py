@@ -287,19 +287,19 @@ def test_example_config_parses_with_all_sections():
 
     root = Path(__file__).parent.parent
     cfg = load_config(root / "config.example.yaml", root / "secrets.example.yaml")
-    assert [c.url.split("/")[2] for c in cfg.calendars] == ["calendar.google.com", "script.google.com", "calendar.google.com"]
+    hosts = [c.url.split("/")[2] for c in cfg.calendars]
+    assert hosts == ["calendar.google.com", "script.google.com", "calendar.google.com", "calendar.google.com"]
+    assert cfg.countdown.dedicated == {"countdown"}
     assert cfg.off is not None and cfg.off.weekdays == {5, 6}
     assert cfg.holiday is not None and cfg.quiet_hours is not None
 
 
 def test_secret_url_overrides_and_missing_url_errors():
-    import pytest
-
     raw = {"calendars": [{"name": "a", "url": "http://inline"}, {"name": "b"}]}
     cfg = parse_config(raw, {"calendars": {"a": "http://secret", "b": "http://b"}})
     assert [c.url for c in cfg.calendars] == ["http://secret", "http://b"]
-    with pytest.raises(ValueError, match="secrets.yaml"):
-        parse_config(raw)
+    # url が無いカレンダーは警告してスキップ (時報は止めない)
+    assert [c.name for c in parse_config(raw).calendars] == ["a"]
     assert "http" not in repr(cfg.calendars)
 
 
@@ -382,3 +382,22 @@ def test_grid_floor():
     assert grid_floor(at(14, 8, 59)) == at(14, 4)
     assert grid_floor(at(14, 9, 0)) == at(14, 9)
     assert grid_floor(at(14, 3)) == at(13, 59)
+
+
+def test_dedicated_countdown_calendar_is_independent_of_chimes():
+    from hourly_chime.main import collect
+
+    cfg = parse_config(
+        {
+            "calendars": [{"name": "roo", "url": "x"}, {"name": "cd", "url": "y", "countdown": True}],
+            "countdown": {"title": "^⏰", "offsets": [5]},
+        }
+    )
+    e = ev("cd", "出発", at(15, 30), at(16, 30))
+    assert [c.at for c in cdm.from_events([e], cfg)] == [at(15, 30)]
+    # 時報は専用カレンダーの予定を一切見ない (予定中にも案内にも使わない)
+    cues = [(c.at, c.label, c.sound, c.text) for c in collect(at(14, 54, 30), at(16, 5), [e], cfg, None) if not c.silent]
+    assert (at(14, 55), "5分前", None, "15時5分前です。") in cues
+    assert (at(16), "正時", "pipipipoon", "16時です。") in cues
+    assert (at(15, 25), "CD5分前", None, "15時30分まで、あと5分です。") in cues
+    assert not [c for c in cues if c[1].startswith("予定")]

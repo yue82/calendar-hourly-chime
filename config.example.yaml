@@ -17,6 +17,8 @@ calendars:
   - name: private
   - name: work
     busy_only: true  # 予定名は読まず、時間枠だけ使う (「予定があります」とは知らせる)
+  - name: countdown
+    countdown: true  # カウントダウン専用: 全予定の開始時刻に向けてカウントダウン。時報の判定には使わない
   - name: holiday
     url: https://calendar.google.com/calendar/ical/ja.japanese%23holiday%40group.v.calendar.google.com/public/basic.ics
 
@@ -42,7 +44,7 @@ off_days:
 # カウントダウン: 指定時刻に向けて offsets 分前に「H時M分まで、あとN分です。」、時刻にピピピポーン。
 # quiet_hours・休日・off_days に関係なく鳴らし、重なった時報より優先する。
 #   コマンド: hourly-chime countdown 15:30 / 1530 / +45  [--offsets 30,10,5]
-#   カレンダー: 予定名が title に合う予定の開始時刻 (例: 「⏰出発」)
+#   カレンダー: countdown: true のカレンダーの予定、または予定名が title に合う予定 (例: 「⏰出発」) の開始時刻
 countdown:
   offsets: [30, 20, 10, 5, 2, 1]
   title: "^⏰"

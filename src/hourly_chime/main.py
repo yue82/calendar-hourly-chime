@@ -59,13 +59,18 @@ def window_of(now: datetime) -> tuple[datetime, datetime]:
     return base + LEAD, base + LEAD + INTERVAL
 
 
+def chime_events(events: list[ical.Event], cfg: Config) -> list[ical.Event]:
+    """時報の判定に使う予定。カウントダウン専用カレンダーの予定は時報と独立させるので除く。"""
+    return [e for e in events if e.calendar not in cfg.countdown.dedicated]
+
+
 def collect(start: datetime, end: datetime, events: list[ical.Event], cfg: Config, registered_before: datetime | None) -> list[rules.Cue]:
     """時報 + カウントダウン (コマンド登録分は registered_before より前に登録されたもの)。"""
     cds = countdown.from_events(events, cfg) + [
         c for c in countdown.load() if registered_before is None or c.created < registered_before
     ]
     cd_cues = [q for cd in cds for q in countdown.cues_of(cd) if start <= q.at < end]
-    return countdown.merge(rules.plan_window(start, end, events, cfg), cd_cues)
+    return countdown.merge(rules.plan_window(start, end, chime_events(events, cfg), cfg), cd_cues)
 
 
 def play_cues(cues: list[rules.Cue], cfg: Config) -> None:
@@ -175,7 +180,7 @@ def cmd_demo(args: argparse.Namespace, cfg: Config) -> int:
     target = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else next_target(
         datetime.now(cfg.timezone)
     )
-    plans = rules.plan_hour(target, get_events(cfg, target, 3, refresh=False), cfg)
+    plans = rules.plan_hour(target, chime_events(get_events(cfg, target, 3, refresh=False), cfg), cfg)
     if args.sound_only:
         plans = [replace(p, sound=s.sound, text=None, reason="sound-only") for p, s in zip(plans, rules.HOUR_SLOTS)]
     rendered = []
