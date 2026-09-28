@@ -1,6 +1,6 @@
 """いつ何を鳴らすか (Cue) を決める。副作用なし。
 
-- 正時 N:00 に向けて 5分前・2分前・15秒前・ちょうど (HOUR_SLOTS)
+- 正時 N:00 に向けて 5分前・2分前・15秒前・ちょうど (HOUR_SLOTS)。N時台に始まる予定が無ければちょうどのみ
 - 正時始まりでない予定に向けて 2分前・15秒前・ちょうど (EVENT_SLOTS)
 """
 
@@ -166,8 +166,15 @@ def plan_hour(target: datetime, events: list[Event], cfg: Config) -> list[Cue]:
     if cfg.quiet_hours and cfg.quiet_hours.contains(target.time()):
         return [skip(s, "quiet_hours") for s in HOUR_SLOTS]
 
+    # N時台に始まる予定が無ければ、正時だけ鳴らす
+    hour_end = target + timedelta(hours=1)
+    has_events = any(not e.all_day and target <= e.start < hour_end for e in events)
+
     cues = []
     for s in HOUR_SLOTS:
+        if not has_events and s.offset != timedelta(0):
+            cues.append(skip(s, "N時台の予定なし"))
+            continue
         window = None
         if s.announce_hour is not None:
             start = target + timedelta(hours=s.announce_hour)

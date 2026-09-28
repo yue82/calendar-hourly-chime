@@ -34,21 +34,28 @@ def summary(target: datetime, events: list[Event]) -> list[tuple[str | None, str
     return [(p.sound, p.text) for p in plan_hour(target, events, CFG)]
 
 
-def test_no_events():
-    assert summary(at(14), []) == [
-        (None, "14時5分前です。"),
+def test_no_events_in_hour_only_on_the_hour():
+    assert summary(at(14), []) == [(None, None), (None, None), (None, None), ("pipipipoon", "14時です。")]
+
+
+def test_events_in_hour_full_sequence():
+    events = [ev("roo", "歯医者", at(14, 40), at(15))]
+    assert summary(at(14), events) == [
+        (None, "14時5分前です。14時40分から、歯医者です。"),
         (None, "2分前です。"),
         (None, "15秒前です。"),
         ("pipipipoon", "14時です。"),
     ]
-    plans = plan_hour(at(14), [], CFG)
+    plans = plan_hour(at(14), events, CFG)
     assert [p.at for p in plans] == [at(13, 55), at(13, 58), at(13, 59, 45), at(14)]
+    # 翌時台の予定だけでは N 時台の予定にならない
+    assert summary(at(14), [ev("roo", "x", at(15), at(16))])[0] == (None, None)
 
 
 def test_quiet_hours_by_target_hour():
     assert all(p.silent for p in plan_hour(at(20), [], CFG))
     assert all(p.silent for p in plan_hour(at(3), [], CFG))
-    assert not any(p.silent for p in plan_hour(at(8), [], CFG))  # 7:55 からの 8 時の時報は鳴る
+    assert not plan_hour(at(8), [], CFG)[3].silent  # 8 時の時報は鳴る
 
 
 def test_quiet_hours_from_unquoted_yaml():
@@ -57,8 +64,12 @@ def test_quiet_hours_from_unquoted_yaml():
     assert all(p.silent for p in plan_hour(at(20), [], cfg))
 
 
-def test_event_spanning_hour_makes_all_sound_only():
+def test_event_spanning_hour_sound_only():
+    # 14時台に始まる予定が無ければ正時の音だけ
     events = [ev("roo", "作業", at(13), at(15))]
+    assert summary(at(14), events) == [(None, None), (None, None), (None, None), ("pipipipoon", None)]
+    # 14時台に始まる予定もあれば、4 回とも音のみ
+    events.append(ev("roo", "打合せ", at(14, 30), at(15)))
     assert summary(at(14), events) == [
         ("popopopopo", None),
         ("popo", None),
@@ -84,7 +95,7 @@ def test_event_starting_on_the_hour():
 
 
 def test_event_ending_on_the_hour_is_not_busy():
-    events = [ev("roo", "会議", at(13), at(14))]
+    events = [ev("roo", "会議", at(13), at(14)), ev("roo", "次", at(14, 30), at(15))]
     s = summary(at(14), events)
     assert s[0] == ("popopopopo", None)  # 13:55 は予定中
     assert s[3] == ("pipipipoon", "14時です。")  # 14:00 は終わっている
@@ -148,7 +159,7 @@ def test_holiday_description_filter():
     # 祭日 (クリスマス等) は休日扱いしない
     xmas = ev("holiday", "クリスマス", at(0, day=25), at(0, day=26), all_day=True)
     xmas = Event(xmas.calendar, xmas.title, xmas.start, xmas.end, True, "祭日\n祭日を非表示にするには…")
-    assert not any(p.silent for p in plan_hour(at(14, day=25), [xmas], CFG))
+    assert plan_hour(at(14, day=25), [xmas], CFG)[3].text == "14時です。"
 
 
 def test_next_target():
@@ -195,7 +206,8 @@ def test_parse_ics_recurring_allday_cancelled():
     assert (mtg.start, mtg.end, mtg.all_day) == (at(14), at(15), False)
     off = titles["有給"]
     assert off.all_day and off.start == at(0) and off.end == at(0, day=29)
-    assert plan_hour(at(15), events, CFG)[0].sound == "popopopopo"  # 14:55 は週次MTG中
+    assert plan_hour(at(14), events, CFG)[3].sound == "pipipipoon"  # 14:00 は週次MTG中
+    assert plan_hour(at(14), events, CFG)[3].text is None
 
 
 # --- 休み (曜日・タイトル) ---
@@ -212,7 +224,7 @@ def test_off_title_on_roo_only():
     vac = ev("roo", "会社年末有休取得日", at(0), at(0, day=29), all_day=True)
     assert all(p.silent for p in plan_hour(at(14), [vac], CFG))
     other = ev("tai", "休み", at(0), at(0, day=29), all_day=True)  # roo 以外は見ない
-    assert not any(p.silent for p in plan_hour(at(14), [other], CFG))
+    assert not plan_hour(at(14), [other], CFG)[3].silent
 
 
 def test_off_title_only_all_day():
@@ -397,7 +409,9 @@ def test_dedicated_countdown_calendar_is_independent_of_chimes():
     assert [c.at for c in cdm.from_events([e], cfg)] == [at(15, 30)]
     # 時報は専用カレンダーの予定を一切見ない (予定中にも案内にも使わない)
     cues = [(c.at, c.label, c.sound, c.text) for c in collect(at(14, 54, 30), at(16, 5), [e], cfg, None) if not c.silent]
-    assert (at(14, 55), "5分前", None, "15時5分前です。") in cues
+    # 専用カレンダーの 15:30 の予定は「15時台の予定」にならない → 15時は正時のみ
+    assert not [c for c in cues if c[1] == "5分前"]
+    assert (at(15), "正時", "pipipipoon", "15時です。") in cues
     assert (at(16), "正時", "pipipipoon", "16時です。") in cues
     assert (at(15, 25), "CD5分前", None, "15時30分まで、あと5分です。") in cues
     assert not [c for c in cues if c[1].startswith("予定")]
