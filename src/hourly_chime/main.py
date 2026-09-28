@@ -5,17 +5,19 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from . import ical, player, rules, tts
+from . import ical, player, rules, sounds, tts
 from .config import DEFAULT_CONFIG_PATH, STATE_DIR, Config, load_config
 
 log = logging.getLogger("hourly_chime")
 
-# 起動がこれ以上遅れたら鳴らさない (スリープ復帰直後などに古い時報を鳴らさないため)
-MAX_DELAY = timedelta(minutes=5)
+# スケジューラは毎時 54:30 に起動する。正時を少し過ぎての起動 (スリープ復帰など) ならその正時を対象にする
+GRACE = timedelta(seconds=30)
 
 
 def setup_logging(verbose: bool) -> None:
@@ -32,8 +34,11 @@ def setup_logging(verbose: bool) -> None:
     root.addHandler(sh)
 
 
-def nearest_hour(t: datetime) -> datetime:
-    return (t + timedelta(minutes=30)).replace(minute=0, second=0, microsecond=0)
+def next_target(now: datetime) -> datetime:
+    """now - GRACE 以降で最初の正時。"""
+    t = now - GRACE
+    floor = t.replace(minute=0, second=0, microsecond=0)
+    return floor if floor == t else floor + timedelta(hours=1)
 
 
 def get_events(cfg: Config, around: datetime, hours_after: float, refresh: bool) -> list[ical.Event]:
@@ -46,56 +51,92 @@ def get_events(cfg: Config, around: datetime, hours_after: float, refresh: bool)
     )
 
 
-def speak(text: str, cfg: Config) -> None:
-    paths = ([cfg.chime_wav] if cfg.chime_wav else []) + [tts.synthesize(text, cfg.tts)]
-    player.play(paths, cfg.player)
+def render(plan: rules.SlotPlan, cfg: Config) -> tuple[Path, float]:
+    """(wav, アンカー秒) を返す。"""
+    voice = tts.synthesize(plan.text, cfg.tts) if plan.text else None
+    return sounds.compose(plan.sound, voice)
+
+
+def describe(plan: rules.SlotPlan) -> str:
+    what = " + ".join(x for x in (plan.sound, plan.text and f"「{plan.text}」") if x) or "(鳴らさない)"
+    return f"{plan.at:%m/%d %H:%M:%S} {plan.slot.name:<5} {what}  [{plan.reason}]"
 
 
 def cmd_chime(args: argparse.Namespace, cfg: Config) -> int:
-    now = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else datetime.now(cfg.timezone)
-    target = nearest_hour(now)
-    if abs(now - target) > MAX_DELAY and not args.force:
-        log.info("正時から %s ずれているのでスキップ", now - target)
+    if args.at:
+        target = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone)
+    else:
+        target = next_target(datetime.now(cfg.timezone))
+    events = get_events(cfg, target, 3, refresh=False)
+    plans = rules.plan_hour(target, events, cfg)
+    for p in plans:
+        log.info("%s", describe(p))
+        if args.dry_run:
+            print(describe(p))
+    if args.dry_run:
         return 0
 
-    horizon = max(cfg.announce_next.within_minutes / 60, 0) + 1
-    events = get_events(cfg, target, horizon, refresh=False)
-    d = rules.decide(target, events, cfg)
-    log.info("%s -> %s (%s)", target.strftime("%Y-%m-%d %H:%M"), d.text or "(mute)", d.reason)
-    if args.dry_run:
-        print(f"{target:%Y-%m-%d %H:%M}  {d.text or '(鳴らさない)'}  [{d.reason}]")
-        return 0
-    if d.text:
-        speak(d.text, cfg)
-    tts.prune_cache()
+    items = []
+    for p in plans:
+        if p.silent:
+            continue
+        wav, anchor = render(p, cfg)
+        items.append(player.Scheduled(wav, p.at.timestamp() - anchor, p.slot.name))
+    player.play_scheduled(items, cfg.player)
+    tts.prune_cache(sounds.SLOT_CACHE)
+    return 0
+
+
+def cmd_demo(args: argparse.Namespace, cfg: Config) -> int:
+    """次の正時の 4 つのタイミングを、間を詰めて今すぐ鳴らす (鳴らさない時間帯は無視)。"""
+    cfg = replace(
+        cfg, quiet_hours=None, calendars=tuple(replace(c, mute_all_day=False) for c in cfg.calendars)
+    )
+    target = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else next_target(
+        datetime.now(cfg.timezone)
+    )
+    plans = rules.plan_hour(target, get_events(cfg, target, 3, refresh=False), cfg)
+    if args.sound_only:
+        plans = [replace(p, sound=p.slot.sound, text=None, reason="sound-only") for p in plans]
+    rendered = []
+    for p in plans:
+        print(describe(p))
+        rendered.append((render(p, cfg)[0], p.slot.name))
+    items = []
+    t = time.time() + 2  # PowerShell の起動待ち
+    for wav, name in rendered:
+        items.append(player.Scheduled(wav, t, name))
+        t += sounds.duration(wav) + 1.0
+    player.play_scheduled(items, cfg.player)
     return 0
 
 
 def cmd_events(args: argparse.Namespace, cfg: Config) -> int:
     now = datetime.now(cfg.timezone)
     events = get_events(cfg, now, args.hours, refresh=args.refresh)
+    busy_only = {c.name for c in cfg.calendars if c.busy_only}
     for e in events:
         if e.end <= now or e.start > now + timedelta(hours=args.hours):
             continue
         when = f"{e.start:%m/%d} 終日" if e.all_day else f"{e.start:%m/%d %H:%M}-{e.end:%H:%M}"
-        print(f"{when:<20} [{e.calendar}] {e.title}")
+        title = "(時間枠のみ)" if e.calendar in busy_only else e.title
+        print(f"{when:<20} [{e.calendar}] {title}")
     return 0
 
 
 def cmd_simulate(args: argparse.Namespace, cfg: Config) -> int:
-    """これから N 時間分の時報を dry-run で一覧表示する。"""
-    start = nearest_hour(datetime.now(cfg.timezone))
-    horizon = max(cfg.announce_next.within_minutes / 60, 0) + 1
-    events = get_events(cfg, start, args.hours + horizon, refresh=args.refresh)
+    """この先 N 時間分の時報を一覧表示する。"""
+    start = next_target(datetime.now(cfg.timezone))
+    events = get_events(cfg, start, args.hours + 2, refresh=args.refresh)
     for i in range(args.hours):
-        t = start + timedelta(hours=i)
-        d = rules.decide(t, events, cfg)
-        print(f"{t:%m/%d %H:%M}  {d.text or '(鳴らさない)'}  [{d.reason}]")
+        for p in rules.plan_hour(start + timedelta(hours=i), events, cfg):
+            if args.all or not p.silent:
+                print(describe(p))
     return 0
 
 
 def cmd_say(args: argparse.Namespace, cfg: Config) -> int:
-    speak(args.text, cfg)
+    player.play_now([tts.synthesize(args.text, cfg.tts)], cfg.player)
     return 0
 
 
@@ -105,11 +146,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    c = sub.add_parser("chime", help="時報を鳴らす (スケジューラから毎時呼ぶ)")
-    c.add_argument("--dry-run", action="store_true", help="喋らずに判定結果だけ表示")
-    c.add_argument("--force", action="store_true", help="正時から離れていても鳴らす")
-    c.add_argument("--at", help="この時刻として判定する (例: 2026-09-28T14:00)")
+    c = sub.add_parser("chime", help="次の正時の時報を鳴らす (スケジューラから毎時 54:30 に呼ぶ)")
+    c.add_argument("--dry-run", action="store_true", help="鳴らさずに計画だけ表示")
+    c.add_argument("--at", help="この正時として判定する (例: 2026-09-28T14:00)")
     c.set_defaults(func=cmd_chime)
+
+    d = sub.add_parser("demo", help="次の正時の時報を間を詰めて今すぐ鳴らす")
+    d.add_argument("--at", help="この正時として判定する")
+    d.add_argument("--sound-only", action="store_true", help="予定中 (音のみ) の場合を鳴らす")
+    d.set_defaults(func=cmd_demo)
 
     e = sub.add_parser("events", help="予定一覧を表示")
     e.add_argument("--hours", type=float, default=24)
@@ -118,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("simulate", help="この先の時報を一覧表示")
     s.add_argument("--hours", type=int, default=24)
+    s.add_argument("--all", action="store_true", help="鳴らさないものも表示")
     s.add_argument("--refresh", action="store_true")
     s.set_defaults(func=cmd_simulate)
 

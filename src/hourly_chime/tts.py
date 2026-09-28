@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 
 from .config import CACHE_DIR, TTSConfig
+from .sounds import RATE
 
 log = logging.getLogger(__name__)
 
@@ -19,20 +20,20 @@ TTS_CACHE = CACHE_DIR / "tts"
 CACHE_TTL_DAYS = 30
 
 
-def run_powershell(script: str, timeout: float = 60) -> None:
+def run_powershell(script: str, timeout: float = 60) -> str:
     # 日本語をコマンドラインで渡すと文字化けするので UTF-16LE base64 で渡す
     # 進捗表示が CLIXML として stderr に漏れるので抑止する
-    script = "$ProgressPreference = 'SilentlyContinue'\n" + script
+    script = "$ProgressPreference = 'SilentlyContinue'\n[Console]::OutputEncoding = [Text.Encoding]::UTF8\n" + script
     enc = base64.b64encode(script.encode("utf-16-le")).decode()
-    subprocess.run(
+    return subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
         check=True,
         timeout=timeout,
-        stdout=subprocess.DEVNULL,
+        capture_output=True,
         stdin=subprocess.DEVNULL,
         # WSL の cwd が UNC だと警告が出るので Windows 側のディレクトリから起動する
         cwd="/mnt/c",
-    )
+    ).stdout.decode("utf-8", "replace")
 
 
 def ps_quote(s: str) -> str:
@@ -50,7 +51,8 @@ Add-Type -AssemblyName System.Speech
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $s.SelectVoice({ps_quote(cfg.sapi_voice)})
 $s.Rate = {int(cfg.sapi_rate)}
-$s.SetOutputToWaveFile({ps_quote(to_windows_path(out))})
+$fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo({RATE}, 'Sixteen', 'Mono')
+$s.SetOutputToWaveFile({ps_quote(to_windows_path(out))}, $fmt)
 $s.Speak({ps_quote(text)})
 $s.Dispose()
 """
@@ -62,7 +64,7 @@ def _synth_voicevox(text: str, out: Path, cfg: TTSConfig) -> None:
     q = requests.post(f"{cfg.voicevox_url}/audio_query", params={**params, "text": text}, timeout=10)
     q.raise_for_status()
     query = q.json()
-    query["speedScale"] = cfg.voicevox_speed
+    query.update(speedScale=cfg.voicevox_speed, outputSamplingRate=RATE, outputStereo=False)
     r = requests.post(f"{cfg.voicevox_url}/synthesis", params=params, json=query, timeout=60)
     r.raise_for_status()
     out.write_bytes(r.content)
@@ -72,7 +74,7 @@ def _cache_key(engine: str, text: str, cfg: TTSConfig) -> str:
     if engine == "voicevox":
         opts = f"{cfg.voicevox_speaker}|{cfg.voicevox_speed}"
     else:
-        opts = f"{cfg.sapi_voice}|{cfg.sapi_rate}"
+        opts = f"{cfg.sapi_voice}|{cfg.sapi_rate}|{RATE}"
     return hashlib.sha256(f"{engine}|{opts}|{text}".encode()).hexdigest()[:16]
 
 
@@ -103,10 +105,10 @@ def synthesize(text: str, cfg: TTSConfig) -> Path:
     raise RuntimeError("全ての TTS エンジンが失敗しました") from last_err
 
 
-def prune_cache() -> None:
-    if not TTS_CACHE.exists():
-        return
+def prune_cache(*extra_dirs: Path) -> None:
+    cache_dirs = [d for d in (TTS_CACHE, *extra_dirs) if d.exists()]
     limit = time.time() - CACHE_TTL_DAYS * 86400
-    for p in TTS_CACHE.glob("*.wav"):
-        if p.stat().st_mtime < limit:
-            p.unlink(missing_ok=True)
+    for d in cache_dirs:
+        for p in d.glob("*.wav"):
+            if p.stat().st_mtime < limit:
+                p.unlink(missing_ok=True)

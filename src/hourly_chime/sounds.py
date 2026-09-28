@@ -1,0 +1,122 @@
+"""時報音の合成と、音 + 読み上げを 1 つの wav に繋ぐ処理。
+
+音は NHK 式時報に倣う: ピッ = 440Hz 0.1秒、ポーン = 880Hz の減衰音。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import math
+import wave
+from array import array
+from pathlib import Path
+
+from .config import CACHE_DIR
+
+RATE = 24000  # VOICEVOX の既定出力と揃える
+SLOT_CACHE = CACHE_DIR / "slots"
+VERSION = "v1"  # 音を変えたら上げる (キャッシュ無効化)
+
+
+def _tone(freq: float, dur: float, tau: float | None, amp: float, harmonic: float = 0.0) -> list[float]:
+    n = int(dur * RATE)
+    attack, release = int(0.003 * RATE), int(0.01 * RATE)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        env = math.exp(-t / tau) if tau else 1.0
+        env *= min(1.0, i / attack, (n - i) / release)
+        v = math.sin(2 * math.pi * freq * t) + harmonic * math.sin(4 * math.pi * freq * t)
+        out.append(amp * env * v / (1 + harmonic))
+    return out
+
+
+def _pip() -> list[float]:
+    return _tone(440, 0.1, None, 0.45)
+
+
+def _poon() -> list[float]:
+    return _tone(880, 2.5, 0.7, 0.5, harmonic=0.15)
+
+
+def _po() -> list[float]:
+    return _tone(880, 0.15, 0.06, 0.5, harmonic=0.15)
+
+
+def _sequence(parts: list[tuple[float, list[float]]]) -> list[float]:
+    total = max(int(at * RATE) + len(s) for at, s in parts)
+    buf = [0.0] * total
+    for at, s in parts:
+        o = int(at * RATE)
+        for i, v in enumerate(s):
+            buf[o + i] += v
+    return buf
+
+
+# 名前 -> (合成関数, アンカー秒)。アンカー秒の位置が指定時刻ちょうどに来るよう再生する。
+SOUNDS = {
+    "pipipipoon": (lambda: _sequence([(0, _pip()), (1, _pip()), (2, _pip()), (3, _poon())]), 3.0),
+    "popopopopo": (lambda: _sequence([(i * 0.2, _po()) for i in range(5)]), 0.0),
+    "popo": (lambda: _sequence([(i * 0.2, _po()) for i in range(2)]), 0.0),
+    "poon": (lambda: _poon(), 0.0),
+}
+
+
+def _read_wav(path: Path) -> list[float]:
+    with wave.open(str(path), "rb") as w:
+        if w.getsampwidth() != 2:
+            raise ValueError(f"16bit 以外の wav は未対応: {path}")
+        ch, rate = w.getnchannels(), w.getframerate()
+        a = array("h", w.readframes(w.getnframes()))
+    mono = [sum(a[i : i + ch]) / ch / 32768 for i in range(0, len(a), ch)]
+    if rate == RATE or not mono:
+        return mono
+    # 線形補間でリサンプル
+    n = int(len(mono) * RATE / rate)
+    out = []
+    for i in range(n):
+        x = i * rate / RATE
+        j = int(x)
+        k = min(j + 1, len(mono) - 1)
+        out.append(mono[j] + (mono[k] - mono[j]) * (x - j))
+    return out
+
+
+def _write_wav(path: Path, samples: list[float]) -> None:
+    pcm = array("h", (max(-32767, min(32767, int(v * 32767))) for v in samples))
+    tmp = path.with_suffix(".tmp.wav")
+    with wave.open(str(tmp), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(pcm.tobytes())
+    tmp.replace(path)
+
+
+def compose(sound: str | None, voice: Path | None) -> tuple[Path, float]:
+    """音 → (0.3秒) → 読み上げ の wav を作り、(パス, アンカー秒) を返す。"""
+    if sound is None and voice is None:
+        raise ValueError("sound も voice も無い")
+    key = hashlib.sha256(f"{VERSION}|{sound}|{voice.name if voice else ''}".encode()).hexdigest()[:16]
+    out = SLOT_CACHE / f"{key}.wav"
+    anchor = SOUNDS[sound][1] if sound else 0.0
+    if out.exists():
+        out.touch()
+        return out, anchor
+    SLOT_CACHE.mkdir(parents=True, exist_ok=True)
+    if sound and voice:
+        s = SOUNDS[sound][0]()
+        # ポーンは余韻が長いので、鳴り終わりを待たずに余韻へ重ねて読み上げる
+        voice_at = anchor + 1.2 if sound == "pipipipoon" else len(s) / RATE + 0.3
+        buf = _sequence([(0, s), (voice_at, _read_wav(voice))])
+    elif sound:
+        buf = SOUNDS[sound][0]()
+    else:
+        buf = _read_wav(voice)
+    _write_wav(out, buf)
+    return out, anchor
+
+
+def duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as w:
+        return w.getnframes() / w.getframerate()

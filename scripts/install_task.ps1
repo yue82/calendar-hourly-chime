@@ -20,12 +20,12 @@ if ($Uninstall) {
 $args_ = "--headless wsl.exe -d $Distro --cd $RepoDir -e $RepoDir/.venv/bin/hourly-chime chime"
 $action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument $args_
 
-# Every hour on the hour, starting today 00:00, repeating indefinitely
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1)
+# Every hour at xx:54:30 (the process then waits for the 5min/2min/15s/0s cues), repeating indefinitely
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(54).AddSeconds(30) -RepetitionInterval (New-TimeSpan -Hours 1)
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
     -MultipleInstances IgnoreNew
 # Do not catch up on chimes missed while asleep
 $settings.StartWhenAvailable = $false

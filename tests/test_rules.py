@@ -3,85 +3,116 @@ from zoneinfo import ZoneInfo
 
 from hourly_chime.config import parse_config
 from hourly_chime.ical import Event, parse_events
-from hourly_chime.rules import decide
+from hourly_chime.main import next_target
+from hourly_chime.rules import plan_hour
 
 TZ = ZoneInfo("Asia/Tokyo")
 
 CFG = parse_config(
     {
-        "calendars": [{"name": "private", "url": "x"}, {"name": "work", "url": "y"}],
-        "quiet_hours": {"start": "23:00", "end": "07:00"},
-        "rules": [
-            {"name": "mtg", "title": "会議|MTG", "action": "mute"},
-            {"name": "home", "calendar": "work", "title": "在宅", "action": {"message": "{hour}時。休憩({title})"}},
+        "calendars": [
+            {"name": "roo", "url": "x"},
+            {"name": "tai", "url": "y", "busy_only": True},
+            {"name": "holiday", "url": "z", "mute_all_day": True},
         ],
-        "announce_next": {"within_minutes": 60, "exclude_title": "移動"},
+        "quiet_hours": {"start": "20:00", "end": "08:00"},
     }
 )
 
 
-def at(h: int, m: int = 0, day: int = 28) -> datetime:
-    return datetime(2026, 9, day, h, m, tzinfo=TZ)
+def at(h: int, m: int = 0, s: int = 0, day: int = 28) -> datetime:
+    return datetime(2026, 9, day, h, m, s, tzinfo=TZ)
 
 
 def ev(cal: str, title: str, s: datetime, e: datetime, all_day: bool = False) -> Event:
     return Event(cal, title, s, e, all_day)
 
 
-def test_default():
-    d = decide(at(14), [], CFG)
-    assert d.text == "14時です。"
+def summary(target: datetime, events: list[Event]) -> list[tuple[str | None, str | None]]:
+    return [(p.sound, p.text) for p in plan_hour(target, events, CFG)]
 
 
-def test_quiet_hours_wraps_midnight():
-    assert decide(at(23), [], CFG).text is None
-    assert decide(at(3), [], CFG).text is None
-    assert decide(at(7), [], CFG).text == "7時です。"
+def test_no_events():
+    assert summary(at(14), []) == [
+        (None, "14時5分前です。"),
+        (None, "2分前です。"),
+        (None, "15秒前です。"),
+        ("pipipipoon", "14時です。"),
+    ]
+    plans = plan_hour(at(14), [], CFG)
+    assert [p.at for p in plans] == [at(13, 55), at(13, 58), at(13, 59, 45), at(14)]
+
+
+def test_quiet_hours_by_target_hour():
+    assert all(p.silent for p in plan_hour(at(20), [], CFG))
+    assert all(p.silent for p in plan_hour(at(3), [], CFG))
+    assert not any(p.silent for p in plan_hour(at(8), [], CFG))  # 7:55 からの 8 時の時報は鳴る
 
 
 def test_quiet_hours_from_unquoted_yaml():
-    # YAML で 23:00 をクォートし忘れると int (1380) になる
-    cfg = parse_config({"quiet_hours": {"start": 1380, "end": 420}})
-    assert decide(at(23), [], cfg).text is None
+    # YAML で 20:00 をクォートし忘れると int (1200) になる
+    cfg = parse_config({"quiet_hours": {"start": 1200, "end": 480}})
+    assert all(p.silent for p in plan_hour(at(20), [], cfg))
 
 
-def test_mute_during_meeting():
-    events = [ev("work", "定例会議", at(13, 30), at(14, 30))]
-    assert decide(at(14), events, CFG).text is None
-
-
-def test_meeting_starting_exactly_now_mutes_and_ended_does_not():
-    assert decide(at(14), [ev("work", "MTG", at(14), at(15))], CFG).text is None
-    assert decide(at(14), [ev("work", "MTG", at(13), at(14))], CFG).text == "14時です。"
-
-
-def test_calendar_filter():
-    # 「在宅」ルールは work カレンダーのみ
-    home_private = [ev("private", "在宅", at(9), at(18))]
-    assert decide(at(14), home_private, CFG).text == "14時です。"
-    home_work = [ev("work", "在宅", at(9), at(18))]
-    assert decide(at(14), home_work, CFG).text == "14時。休憩(在宅)"
-
-
-def test_rule_order_first_match_wins():
-    events = [ev("work", "在宅", at(9), at(18)), ev("work", "会議", at(14), at(15))]
-    assert decide(at(14), events, CFG).text is None
-
-
-def test_announce_next():
-    events = [
-        ev("private", "歯医者", at(14, 30), at(15, 30)),
-        ev("private", "移動", at(14, 10), at(14, 30)),
-        ev("private", "遠い予定", at(16), at(17)),
-        ev("private", "連休", at(0), at(0) + timedelta(days=1), all_day=True),
+def test_event_spanning_hour_makes_all_sound_only():
+    events = [ev("roo", "作業", at(13), at(15))]
+    assert summary(at(14), events) == [
+        ("popopopopo", None),
+        ("popo", None),
+        ("poon", None),
+        ("pipipipoon", None),
     ]
-    assert decide(at(14), events, CFG).text == "14時です。このあと14時30分から、歯医者です。"
 
 
-def test_announce_disabled():
-    cfg = parse_config({})
-    events = [ev("private", "歯医者", at(14, 30), at(15))]
-    assert decide(at(14), events, cfg).text == "14時です。"
+def test_busy_only_calendar_counts_as_busy():
+    events = [ev("tai", "予定あり", at(13, 30), at(14, 30))]
+    assert all(p.text is None for p in plan_hour(at(14), events, CFG))
+
+
+def test_event_starting_on_the_hour():
+    # 13:55 には予定なし → 読み上げ + 予定案内、14:00 は予定開始 → 音のみ
+    events = [ev("roo", "会議", at(14), at(15))]
+    assert summary(at(14), events) == [
+        (None, "14時5分前です。14時から、会議です。"),
+        (None, "2分前です。"),
+        (None, "15秒前です。"),
+        ("pipipipoon", None),
+    ]
+
+
+def test_event_ending_on_the_hour_is_not_busy():
+    events = [ev("roo", "会議", at(13), at(14))]
+    s = summary(at(14), events)
+    assert s[0] == ("popopopopo", None)  # 13:55 は予定中
+    assert s[3] == ("pipipipoon", "14時です。")  # 14:00 は終わっている
+
+
+def test_announce_this_hour_at_5min_and_next_hour_on_the_hour():
+    events = [
+        ev("roo", "歯医者", at(14, 30), at(15)),
+        ev("roo", "ジム", at(15, 10), at(16)),
+        ev("roo", "遠い予定", at(16), at(17)),
+        ev("tai", "予定あり", at(15, 30), at(16)),  # 時間枠のみ → 読まない
+        ev("roo", "連休", at(0), at(0, day=29), all_day=True),  # 終日 → 無関係
+    ]
+    s = summary(at(14), events)
+    assert s[0] == (None, "14時5分前です。14時30分から、歯医者です。")
+    assert s[3] == ("pipipipoon", "14時です。15時10分から、ジムです。")
+
+
+def test_mute_all_day_calendar():
+    events = [ev("holiday", "祝日", at(0), at(0, day=29), all_day=True)]
+    assert all(p.silent for p in plan_hour(at(14), events, CFG))
+
+
+def test_next_target():
+    assert next_target(at(13, 54, 30)) == at(14)
+    assert next_target(at(13, 58)) == at(14)
+    assert next_target(at(14, 0, 5)) == at(14)
+    assert next_target(at(14, 0, 30)) == at(14)
+    assert next_target(at(14, 1)) == at(15)
+    assert next_target(at(14, 45)) == at(15)
 
 
 ICS = """BEGIN:VCALENDAR
@@ -112,11 +143,11 @@ END:VCALENDAR
 
 
 def test_parse_ics_recurring_allday_cancelled():
-    events = parse_events("work", ICS, at(0), at(0, day=29), TZ)
+    events = parse_events("roo", ICS, at(0), at(0, day=29), TZ)
     titles = {e.title: e for e in events}
     assert set(titles) == {"週次MTG", "有給"}
     mtg = titles["週次MTG"]  # 2026-09-28 は月曜、05:00Z = 14:00 JST
     assert (mtg.start, mtg.end, mtg.all_day) == (at(14), at(15), False)
     off = titles["有給"]
     assert off.all_day and off.start == at(0) and off.end == at(0, day=29)
-    assert decide(at(14), events, CFG).text is None
+    assert plan_hour(at(15), events, CFG)[0].sound == "popopopopo"  # 14:55 は週次MTG中
