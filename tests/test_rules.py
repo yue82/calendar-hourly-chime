@@ -97,6 +97,20 @@ def test_untitled_skipped_when_titled_event_at_same_time():
     assert hour(at(14), events)[1] == "14時です。14時30分から、会議です。14時45分から、予定があります。"
 
 
+def test_hour_chime_uses_titled_event_inside_untitled_block():
+    block = ev("tai", "予定あり", at(14, 30), at(16, 30))
+    lunch = ev("roo", "りうむめし", at(15), at(16))  # tai の枠内、開始は次の時報以降でもよい
+    assert hour(at(14), [block, lunch])[1] == "14時です。15時から、りうむめしです。"
+    # 枠からはみ出す予定は使わない
+    long = ev("roo", "長い", at(15), at(17))
+    assert hour(at(14), [block, long])[1] == "14時です。14時30分から、予定があります。"
+    # 同じ時間の予定は名前のある方
+    same = ev("roo", "会議", at(14, 30), at(16, 30))
+    assert hour(at(14), [block, same])[1] == "14時です。14時30分から、会議です。"
+    # 予定通知 (5分前) は今のまま
+    assert plan_event(block.start, [block], [block, lunch], CFG)[0].text == "14時30分から、予定があります。"
+
+
 # --- 休日 (曜日・祝日・休み予定を同じ扱い) ---
 
 HOLIDAY = ev("holiday", "文化の日", at(0, day=3), at(0, day=4), True, "祝日")  # 9/3 は木曜

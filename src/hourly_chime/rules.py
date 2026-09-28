@@ -87,13 +87,37 @@ def _describe_group(t: datetime, group: list[Event], cfg: Config) -> list[str]:
 
 
 def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Config) -> str:
-    """start <= 開始 < end の予定の案内文。予定名が無い/読めない予定は「予定があります」とだけ言う。
+    """start <= 開始 < end の予定の案内文 (時報用)。
+    予定名が無い/読めない予定は、その時間内に収まる予定名の分かる予定があればそちらを読み
+    (開始が end 以降でもよい)、無ければ「予定があります」とだけ言う。
     同じ時刻に名前のある予定があれば、名前の無い方は省く。"""
     by_start: dict[datetime, list[Event]] = {}
     for e in events:
         if not e.all_day and start <= e.start < end:
             by_start.setdefault(e.start, []).append(e)
-    lines = [x for t in sorted(by_start) for x in _describe_group(t, by_start[t], cfg)]
+    titled = [e for e in events if not e.all_day and readable_title(e, cfg)]
+
+    said: set[tuple[datetime, str]] = set()
+    lines = []
+
+    def say(t: datetime, title: str) -> None:
+        if (t, title) not in said:
+            said.add((t, title))
+            lines.append(cfg.announce_template.format(title=title, start=spoken_time(t)))
+
+    for t in sorted(by_start):
+        group = by_start[t]
+        names = [e for e in group if readable_title(e, cfg)]
+        if not names:
+            names = sorted(
+                (x for x in titled if any(u.start <= x.start and x.end <= u.end for u in group)),
+                key=lambda x: x.start,
+            )
+        if names:
+            for e in names:
+                say(e.start, readable_title(e, cfg))
+        else:
+            lines.append(cfg.announce_untitled_template.format(start=spoken_time(t)))
     return "".join(lines[: cfg.announce_max])
 
 
