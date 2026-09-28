@@ -1,0 +1,68 @@
+# ~/.config/hourly-chime/config.yaml にコピーして使う
+timezone: Asia/Tokyo
+
+# Google カレンダー: 設定 > (カレンダー名) > カレンダーの統合 > 「iCal 形式の非公開 URL」
+# name はルールの calendar: で参照する
+calendars:
+  - name: private
+    url: https://calendar.google.com/calendar/ical/xxxx%40gmail.com/private-xxxx/basic.ics
+  - name: work
+    url: https://calendar.google.com/calendar/ical/yyyy/private-yyyy/basic.ics
+  - name: holiday
+    url: https://calendar.google.com/calendar/ical/ja.japanese%23holiday%40group.v.calendar.google.com/public/basic.ics
+
+refresh_minutes: 10  # この時間以内に取得したキャッシュはそのまま使う
+
+quiet_hours:  # この間は鳴らさない (日付またぎ可)
+  start: "23:00"
+  end: "07:00"
+
+# 使える変数: {hour} {hour12} {ampm}
+message: "{hour}時です。"
+
+# 予定の最中の振る舞い。上から順に評価し、最初に当たったものを使う。
+# 条件 (calendar / title / all_day) は全て AND、省略したものは無条件。
+#   calendar: 名前 or 名前のリスト
+#   title: 正規表現 (部分一致)
+#   action: mute | {message: "..."}   message では {title} {calendar} も使える
+rules:
+  - name: 祝日は黙る
+    calendar: holiday
+    all_day: true
+    action: mute
+  - name: 会議中は黙る
+    title: "会議|MTG|ミーティング|面談|1on1"
+    action: mute
+  - name: 旅行中は黙る
+    calendar: private
+    title: "旅行|帰省"
+    action: mute
+  - name: 在宅勤務
+    calendar: work
+    title: "在宅"
+    action:
+      message: "{hour}時です。少し休憩しましょう。"
+
+# 時報のあとに直近の予定を読み上げる (終日予定は対象外)
+announce_next:
+  within_minutes: 60  # 0 で無効
+  max_items: 2
+  # 使える変数: {title} {calendar} {start} {in_minutes} {hour}
+  template: "このあと{start}から、{title}です。"
+  # calendar: [private, work]   # 対象を絞る場合
+  # exclude_title: "移動"        # 読み上げない予定
+
+tts:
+  engine: sapi  # sapi | voicevox (voicevox 失敗時は sapi にフォールバック)
+  sapi:
+    voice: Microsoft Haruka Desktop
+    rate: 0  # -10..10
+  voicevox:
+    # WSL2 (NAT) からは Windows の localhost に届かないので、VOICEVOX 側で
+    # --host 0.0.0.0 にして Windows ホストの IP を指定する
+    url: http://127.0.0.1:50021
+    speaker: 3  # ずんだもん (ノーマル)
+    speed: 1.0
+
+player: windows  # windows (PowerShell で再生) | paplay (WSLg)
+# chime_wav: /mnt/c/Windows/Media/chimes.wav  # 読み上げ前に鳴らす音
