@@ -1,33 +1,40 @@
-# ~/.config/hourly-chime/config.yaml にコピーして使う
+# ~/.config/calendar-hourly-chime/config.yaml にコピーして使う
 #
-# 時報: 平日は毎正時、休日は holiday.hours の正時に ピピピポーン「N時です。」+ 次にある予定
-#   (次の時報までに始まる予定。20時の次は翌朝8時)
-# 予定通知: 平日・休日・夜間とも、予定の 5分前 ポポポポポ「H時M分から、〇〇です。」・2分前 ポポ・
-#   20秒前 ポーン「〇〇です。」・開始時 ピポーン (言葉なし)。時報と重なったら時報優先
-# 鳴らす時刻に (他の) 予定が入っていれば、時報・予定通知・カウントダウンとも読み上げずに音だけ鳴らす
-# カウントダウン: countdown: true のカレンダーとコマンドで指定。時報・予定通知とは独立
+# 時報       : hour_chime.weekday_hours (休日は holiday_hours) の正時に、音 + text + 次の時報までに始まる予定
+# 予定通知   : 全予定の開始時刻に向けて event_notice.cues (夜間・休日も)
+# カウントダウン: countdown: true のカレンダーの予定とコマンドの指定時刻に向けて countdown.cues
+# 鳴らす時刻に (他の) 予定が入っていれば各 when_busy に従う: sound_only (音だけ) / skip (鳴らさない) / normal
+# conflict_seconds 以内に重なったら priority の順に残す
+#
+# cues の書き方: before (5m / 20s / 0s) 前に sound を鳴らし text を読む。予定名が無いときは text_untitled。
+#   text / text_untitled が無ければ音だけ。sound が無ければ読むだけ。
+#   変数: 予定通知 {start} {title} / カウントダウン {time} {title} {n} (残り分) / 時報 {hour}
+# 組み込みの音: pipipipoon pipoon popopopopo popo poon pin pinpin pinpinpin (sounds で wav に差し替え可)
 timezone: Asia/Tokyo
 
 # url は secrets.yaml の calendars.<name> に書く (公開 URL ならここに url: で書いてもよい)
 calendars:
   - name: private
   - name: work
-    busy_only: true  # 予定名は読まず、時間枠だけ使う (「予定があります」とは知らせる)
+    busy_only: true  # 予定名は読まず、時間枠だけ使う (予定名が無い扱い)
   - name: countdown
-    countdown: true  # カウントダウン専用: 全予定の開始時刻に向けてカウントダウン。時報・予定通知には使わない
+    countdown: true  # カウントダウン専用: 全予定の開始時刻に向けてカウントダウン。時報・予定通知・予定中の判定には使わない
   - name: holiday
     url: https://calendar.google.com/calendar/ical/ja.japanese%23holiday%40group.v.calendar.google.com/public/basic.ics
 
 refresh_minutes: 4  # この時間以内に取得したキャッシュはそのまま使う (5 分ごとに起動)
 
-quiet_hours:  # 平日はこの範囲の時報を鳴らさない (日付またぎ可。予定通知・カウントダウンは鳴らす)
-  start: "21:00"
-  end: "08:00"
+# 時報
+hour_chime:
+  weekday_hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  holiday_hours: [8, 12, 16, 20]
+  sound: pipipipoon
+  text: "{hour}時です。"
+  announce: true  # 続けて N:01〜次の時報ちょうどに始まる予定を読む (announce の文面)
+  when_busy: sound_only
 
-# 休日 (weekdays の曜日、または all_day の条件に合う終日予定がある日) は hours の正時だけ時報を鳴らす。
-# quiet_hours より優先。
+# 休日の判定: weekdays の曜日、または all_day の条件に合う終日予定がある日
 holiday:
-  hours: [8, 12, 16, 20]
   weekdays: [sat, sun]
   all_day:
     - calendar: holiday
@@ -35,20 +42,42 @@ holiday:
     - calendar: private
       title: "有休|有給|休暇|年休|休み|全休|休日|休業"
 
-# カウントダウン: 指定時刻に向けて offsets 分前にピン (30・20分前)・ピンピン (10・5分前)・ピンピンピン (2・1分前) +
-#   「(H時M分の)〇〇まで、あとN分です。」(時刻は with_time の分前だけ)、時刻にピポーン「H時M分、〇〇の時間です。」
-# quiet_hours・休日に関係なく鳴らし、重なった時報・予定通知より優先する。
-#   コマンド: hourly-chime countdown 15:30 / 1530 / +45  [--label 出発] [--offsets 30,10,5]
-#   カレンダー: countdown: true のカレンダーの予定の開始時刻 (予定名 = タイトル)
-countdown:
-  offsets: [30, 20, 10, 5, 2, 1]
-  with_time: [30, 10]  # 時刻も読む
+# 予定通知 (開始時・予定中は会議中かもしれないので情報を読まない)
+event_notice:
+  when_busy: sound_only
+  cues:
+    - {before: 5m, sound: popopopopo, text: "{start}から、{title}です。", text_untitled: "{start}から、予定があります。"}
+    - {before: 2m, sound: popo}
+    - {before: 20s, sound: poon, text: "{title}です。"}
+    - {before: 0s, sound: pipoon}
 
+# カウントダウン (自分のタスク用なので予定名も読む)
+#   コマンド: calendar-hourly-chime countdown 15:30 / 1530 / +45  [--label 出発] [--offsets 30,10,5]
+countdown:
+  when_busy: sound_only
+  cues:
+    - {before: 30m, sound: pin, text: "{time}の{title}まで、あと{n}分です。", text_untitled: "{time}まで、あと{n}分です。"}
+    - {before: 20m, sound: pin, text: "{title}まで、あと{n}分です。", text_untitled: "あと{n}分です。"}
+    - {before: 10m, sound: pinpin, text: "{time}の{title}まで、あと{n}分です。", text_untitled: "{time}まで、あと{n}分です。"}
+    - {before: 5m, sound: pinpin, text: "{title}まで、あと{n}分です。", text_untitled: "あと{n}分です。"}
+    - {before: 2m, sound: pinpinpin, text: "{title}まで、あと{n}分です。", text_untitled: "あと{n}分です。"}
+    - {before: 1m, sound: pinpinpin, text: "{title}まで、あと{n}分です。", text_untitled: "あと{n}分です。"}
+    - {before: 0s, sound: pipoon, text: "{time}、{title}の時間です。", text_untitled: "{time}です。"}
+
+# 重なったとき (conflict_seconds 以内) に残す順
+priority: [countdown, hour_chime, event_notice]
+conflict_seconds: 10
+
+# 時報で読む予定案内
 announce:
-  template: "{start}から、{title}です。"  # 時報・予定通知5分前の案内。変数: {start} {title}
-  event_title_template: "{title}です。"  # 予定通知20秒前 (予定名が無ければ音だけ)
-  untitled_template: "{start}から、予定があります。"  # 予定名が無い / busy_only の予定
+  item: "{start}から、{title}です。"
+  item_untitled: "{start}から、予定があります。"
   max_items: 3
+
+# 音の差し替え (省略時は組み込みの音)。anchor: この秒の位置を指定時刻ちょうどに合わせる
+sounds:
+  # pipoon: /mnt/c/Users/me/Music/pipoon.wav
+  # pipipipoon: {path: /mnt/c/Users/me/Music/jihou.wav, anchor: 3.0}
 
 tts:
   engine: sapi  # sapi | voicevox (voicevox 失敗時は sapi にフォールバック)

@@ -1,11 +1,11 @@
-"""指定時刻に向けたカウントダウン (30/20/10/5/2/1分前 + ちょうど)。
+"""指定時刻に向けたカウントダウン (鳴らし方は countdown.cues)。
 
 指定方法は 2 つ:
-- コマンド (`hourly-chime countdown 15:30`): STATE_DIR/countdowns.json に保存する
+- コマンド (`calendar-hourly-chime countdown 15:30`): STATE_DIR/countdowns.json に保存する
 - カレンダー: countdown: true のカレンダーの予定の開始時刻 (時報・予定通知とは独立)
 
-夜間・休日に関係なく鳴らし、重なった時報・予定通知より優先する。
-自分のタスク用なので予定名も読む。他の予定の最中は音だけ。
+夜間・休日に関係なく鳴らす。自分のタスク用なので予定名も読む。
+予定中の扱いは countdown.when_busy、重なりは priority に従う。
 """
 
 from __future__ import annotations
@@ -18,65 +18,45 @@ from pathlib import Path
 
 from .config import STATE_DIR, Config
 from .ical import Event
-from .rules import Cue, spoken_time
+from .rules import Cue, apply_busy, busy_at, format_spec, spoken_duration, spoken_time
 
 STORE = STATE_DIR / "countdowns.json"
-# カウントダウンの Cue からこの範囲にある他の Cue は鳴らさない
-CONFLICT = timedelta(seconds=10)
 
 
 @dataclass(frozen=True)
 class Countdown:
     at: datetime
-    offsets: tuple[int, ...]  # 分
+    offsets: tuple[int, ...] | None = None  # 鳴らす「N分前」を絞る (None なら countdown.cues の全て)
     label: str | None = None  # 予定名 (無ければ時刻だけ)
     id: str = ""
     created: datetime | None = None  # コマンドで登録した時刻 (カレンダー由来は None)
     source: str = "command"
 
 
-# 残り時間が短いほどピンの回数を増やす
-def _sound(minutes: int) -> str:
-    return "pin" if minutes >= 20 else "pinpin" if minutes >= 5 else "pinpinpin"
-
-
-def _text(cd: Countdown, minutes: int, with_time: bool) -> str:
-    t = spoken_time(cd.at)
-    if cd.label and with_time:
-        return f"{t}の{cd.label}まで、あと{minutes}分です。"
-    if cd.label:
-        return f"{cd.label}まで、あと{minutes}分です。"
-    if with_time:
-        return f"{t}まで、あと{minutes}分です。"
-    return f"あと{minutes}分です。"
-
-
-def cues_of(cd: Countdown, with_time: tuple[int, ...] = (30, 10)) -> list[Cue]:
-    """with_time: 時刻も読む「N分前」。"""
+def cues_of(cd: Countdown, cfg: Config, events: list[Event] = ()) -> list[Cue]:
+    """events: 予定中かどうかの判定に使う予定 (時報・予定通知と同じもの)。"""
+    cc = cfg.countdown
     reason = f"カウントダウン ({cd.source}{' ' + cd.id if cd.id else ''})"
-    out = [
-        Cue(f"CD{m}分前", cd.at - timedelta(minutes=m), _sound(m), _text(cd, m, m in with_time), reason)
-        for m in sorted(set(cd.offsets), reverse=True)
-    ]
-    t = spoken_time(cd.at)
-    done = f"{t}、{cd.label}の時間です。" if cd.label else f"{t}です。"
-    out.append(Cue("CD時刻", cd.at, "pipoon", done, reason))
+    titles = [cd.label] if cd.label else []
+    out = []
+    for spec in cc.cues:
+        minutes = int(spec.before.total_seconds() // 60)
+        if cd.offsets is not None and spec.before and minutes not in cd.offsets:
+            continue
+        at = cd.at - spec.before
+        label = "CD時刻" if not spec.before else f"CD{spoken_duration(spec.before)}"
+        text = format_spec(spec, titles, time=spoken_time(cd.at), n=minutes)
+        out.append(apply_busy(Cue(label, at, spec.sound, text, reason, "countdown"), cc.when_busy, busy_at(at, events)))
     return out
 
 
 def from_events(events: list[Event], cfg: Config) -> list[Countdown]:
     """カウントダウン専用カレンダーの予定の開始時刻。"""
     return [
-        Countdown(e.start, cfg.countdown.offsets, label=e.title or None, source=f"{e.calendar}: {e.title}")
+        Countdown(e.start, label=e.title or None, source=f"{e.calendar}: {e.title}")
         for e in events
         if not e.all_day and e.calendar in cfg.countdown.dedicated
     ]
-
-
-def merge(base: list[Cue], countdown: list[Cue]) -> list[Cue]:
-    """カウントダウン優先で合わせて時刻順に並べる。"""
-    kept = [c for c in base if c.silent or all(abs(c.at - d.at) >= CONFLICT for d in countdown)]
-    return sorted(kept + countdown, key=lambda c: c.at)
 
 
 # --- コマンドで登録したカウントダウンの保存 ---
@@ -90,7 +70,7 @@ def load(path: Path = STORE) -> list[Countdown]:
         out.append(
             Countdown(
                 at=datetime.fromisoformat(r["at"]),
-                offsets=tuple(r["offsets"]),
+                offsets=tuple(r["offsets"]) if r.get("offsets") is not None else None,
                 label=r.get("label"),
                 id=r["id"],
                 created=datetime.fromisoformat(r["created"]),
@@ -105,7 +85,7 @@ def save(items: list[Countdown], path: Path = STORE) -> None:
         {
             "id": c.id,
             "at": c.at.isoformat(),
-            "offsets": list(c.offsets),
+            "offsets": list(c.offsets) if c.offsets is not None else None,
             "label": c.label,
             "created": c.created.isoformat(),
         }
@@ -117,7 +97,7 @@ def save(items: list[Countdown], path: Path = STORE) -> None:
 
 
 def add(
-    at: datetime, offsets: tuple[int, ...], now: datetime, path: Path = STORE, label: str | None = None
+    at: datetime, offsets: tuple[int, ...] | None, now: datetime, path: Path = STORE, label: str | None = None
 ) -> Countdown:
     cd = Countdown(at=at, offsets=offsets, label=label, id=secrets.token_hex(3), created=now)
     save([c for c in load(path) if c.at > now] + [cd], path)

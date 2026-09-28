@@ -36,11 +36,11 @@ function buildIcs_() {
     throw new Error(JSON.stringify(cal.errors));
   }
   const stamp = fmt_(now);
-  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//hourly-chime//busy//JA'];
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//calendar-hourly-chime//busy//JA'];
   cal.busy.forEach(function (b) {
     lines.push(
       'BEGIN:VEVENT',
-      'UID:' + fmt_(new Date(b.start)) + '-' + fmt_(new Date(b.end)) + '@hourly-chime',
+      'UID:' + fmt_(new Date(b.start)) + '-' + fmt_(new Date(b.end)) + '@calendar-hourly-chime',
       'DTSTAMP:' + stamp,
       'DTSTART:' + fmt_(new Date(b.start)),
       'DTEND:' + fmt_(new Date(b.end)),

@@ -1,11 +1,11 @@
-# Register an hourly Windows scheduled task that runs hourly-chime in WSL.
+# Register an hourly Windows scheduled task that runs calendar-hourly-chime in WSL.
 # (Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI.)
 #   From WSL:  powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w scripts/install_task.ps1)"
 #   Remove:    ... -File install_task.ps1 -Uninstall
 param(
     [string]$Distro = "Ubuntu-20.04",
-    [string]$RepoDir = "/home/yue/trunk/hourly-chime",
-    [string]$TaskName = "hourly-chime",
+    [string]$RepoDir = "/home/yue/trunk/calendar-hourly-chime",
+    [string]$TaskName = "calendar-hourly-chime",
     [switch]$Uninstall
 )
 $ErrorActionPreference = "Stop"
@@ -17,7 +17,7 @@ if ($Uninstall) {
 }
 
 # conhost --headless: run wsl.exe without flashing a console window
-$args_ = "--headless wsl.exe -d $Distro --cd $RepoDir -e $RepoDir/.venv/bin/hourly-chime chime"
+$args_ = "--headless wsl.exe -d $Distro --cd $RepoDir -e $RepoDir/.venv/bin/calendar-hourly-chime run"
 $action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument $args_
 
 # Every 5 minutes at xx:x4:00 / xx:x9:00; each run plays the cues in the following 5 minutes

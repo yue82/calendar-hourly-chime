@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
-import logging
 import sys
 import time
 from dataclasses import replace
@@ -14,9 +14,9 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from . import countdown, ical, player, rules, sounds, tts
-from .config import DEFAULT_CONFIG_PATH, STATE_DIR, Config, load_config
+from .config import APP, DEFAULT_CONFIG_PATH, STATE_DIR, Config, HolidayConfig, load_config
 
-log = logging.getLogger("hourly_chime")
+log = logging.getLogger(__package__)
 
 # スケジューラは 5 分ごと (毎時 x4:00, x9:00) に起動し、起動 30 秒後からの 5 分間の Cue を受け持つ
 # (例: 14:54:00 起動 → 14:54:30〜14:59:30)。30 秒は合成・PowerShell 起動の余裕
@@ -29,7 +29,7 @@ GRACE = timedelta(seconds=30)  # 起動時刻の揺れの許容
 def setup_logging(verbose: bool) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    fh = RotatingFileHandler(STATE_DIR / "chime.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    fh = RotatingFileHandler(STATE_DIR / f"{APP}.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     fh.setFormatter(fmt)
     sh = logging.StreamHandler()
     sh.setFormatter(fmt)
@@ -60,30 +60,21 @@ def window_of(now: datetime) -> tuple[datetime, datetime]:
 
 
 def chime_events(events: list[ical.Event], cfg: Config) -> list[ical.Event]:
-    """時報の判定に使う予定。カウントダウン専用カレンダーの予定は時報と独立させるので除く。"""
+    """時報・予定通知・予定中の判定に使う予定。カウントダウン専用カレンダーの予定は独立させるので除く。"""
     return [e for e in events if e.calendar not in cfg.countdown.dedicated]
 
 
-def collect(start: datetime, end: datetime, events: list[ical.Event], cfg: Config, registered_before: datetime | None) -> list[rules.Cue]:
-    """時報 + カウントダウン (コマンド登録分は registered_before より前に登録されたもの)。"""
+def collect(
+    start: datetime, end: datetime, events: list[ical.Event], cfg: Config, registered_before: datetime | None
+) -> list[rules.Cue]:
+    """start <= at < end の時報・予定通知・カウントダウン (重なり解決済み)。
+    コマンド登録のカウントダウンは registered_before より前に登録されたものだけ。"""
     cds = countdown.from_events(events, cfg) + [
         c for c in countdown.load() if registered_before is None or c.created < registered_before
     ]
     evs = chime_events(events, cfg)
-    cd_cues = [
-        countdown_cue(q, evs)
-        for cd in cds
-        for q in countdown.cues_of(cd, cfg.countdown.with_time)
-        if start <= q.at < end
-    ]
-    return countdown.merge(rules.plan_window(start, end, evs, cfg), cd_cues)
-
-
-def countdown_cue(q: rules.Cue, events: list[ical.Event]) -> rules.Cue:
-    """他の予定の最中なら音だけにする。"""
-    if busy := rules.busy_at(q.at, events):
-        return replace(q, text=None, reason=f"{q.reason} / 予定中 ({busy.calendar}: {busy.title})")
-    return q
+    cd_cues = [q for cd in cds for q in countdown.cues_of(cd, cfg, evs) if start <= q.at < end]
+    return rules.resolve(rules.plan_window(start, end, evs, cfg) + cd_cues, cfg)
 
 
 def play_cues(cues: list[rules.Cue], cfg: Config) -> None:
@@ -110,15 +101,15 @@ def get_events(cfg: Config, around: datetime, hours_after: float, refresh: bool)
 def render(cue: rules.Cue, cfg: Config) -> tuple[Path, float]:
     """(wav, アンカー秒) を返す。"""
     voice = tts.synthesize(cue.text, cfg.tts) if cue.text else None
-    return sounds.compose(cue.sound, voice)
+    return sounds.compose(cue.sound, voice, cfg.sounds)
 
 
 def describe(cue: rules.Cue) -> str:
     what = " + ".join(x for x in (cue.sound, cue.text and f"「{cue.text}」") if x) or "(鳴らさない)"
-    return f"{cue.at:%m/%d %H:%M:%S} {cue.label:<6} {what}  [{cue.reason}]"
+    return f"{cue.at:%m/%d %H:%M:%S} {cue.label:<7} {what}  [{cue.reason}]"
 
 
-def cmd_chime(args: argparse.Namespace, cfg: Config) -> int:
+def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
     now = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else datetime.now(cfg.timezone)
     start, end = window_of(now)
     events = get_events(cfg, start, 3, refresh=False)
@@ -135,12 +126,16 @@ def cmd_chime(args: argparse.Namespace, cfg: Config) -> int:
     return 0
 
 
+def _offsets_text(offsets: tuple[int, ...] | None) -> str:
+    return "設定どおり" if offsets is None else ",".join(map(str, offsets)) + "分前"
+
+
 def cmd_countdown(args: argparse.Namespace, cfg: Config) -> int:
     now = datetime.now(cfg.timezone)
     if args.list:
         for c in countdown.load():
             if c.at > now:
-                print(f"{c.id}  {c.at:%m/%d %H:%M}  {c.label or '-'}  {','.join(map(str, c.offsets))}分前")
+                print(f"{c.id}  {c.at:%m/%d %H:%M}  {c.label or '-'}  {_offsets_text(c.offsets)}")
         for c in countdown.from_events(get_events(cfg, now, 24, refresh=False), cfg):
             if c.at > now:
                 print(f"{'(cal)':<6}  {c.at:%m/%d %H:%M}  {c.source}")
@@ -157,15 +152,20 @@ def cmd_countdown(args: argparse.Namespace, cfg: Config) -> int:
         return 2
 
     at = countdown.parse_time(args.time, now)
-    offsets = tuple(int(x) for x in args.offsets.split(",")) if args.offsets else cfg.countdown.offsets
+    offsets = tuple(int(x) for x in args.offsets.split(",")) if args.offsets else None
+    if offsets is not None:
+        known = {int(s.before.total_seconds() // 60) for s in cfg.countdown.cues if s.before}
+        if unknown := set(offsets) - known:
+            print(f"countdown.cues に無い分前です: {sorted(unknown)} (設定: {sorted(known)})", file=sys.stderr)
+            return 2
     cd = countdown.add(at, offsets, now, label=args.label)
-    print(f"登録: {cd.id}  {at:%m/%d %H:%M} {cd.label or ''} に向けて {','.join(map(str, offsets))}分前")
+    print(f"登録: {cd.id}  {at:%m/%d %H:%M} {cd.label or ''} に向けて {_offsets_text(offsets)}")
 
     # 既に起動済みのスケジューラはこの登録を知らないので、その受け持ち分は自分で鳴らす
     until = grid_floor(now) + LEAD + INTERVAL
-    if any(now < q.at < until for q in countdown.cues_of(cd)):
+    if any(now < q.at < until for q in countdown.cues_of(cd, cfg)):
         subprocess.Popen(
-            [sys.executable, "-m", "hourly_chime.main", "-c", str(args.config), "countdown-play", cd.id, until.isoformat()],
+            [sys.executable, "-m", f"{__package__}.main", "-c", str(args.config), "countdown-play", cd.id, until.isoformat()],
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -181,24 +181,11 @@ def cmd_countdown_play(args: argparse.Namespace, cfg: Config) -> int:
     until = datetime.fromisoformat(args.until)
     cds = [c for c in countdown.load() if c.id == args.id]
     evs = chime_events(get_events(cfg, now, 1, refresh=False), cfg)
-    cues = [
-        countdown_cue(q, evs) for cd in cds for q in countdown.cues_of(cd, cfg.countdown.with_time) if now <= q.at < until
-    ]
+    cues = [q for cd in cds for q in countdown.cues_of(cd, cfg, evs) if now <= q.at < until]
     for c in cues:
         log.info("%s", describe(c))
     play_cues(cues, cfg)
     return 0
-
-
-SOUND_NAMES = {
-    "popopopopo": "予定5分前、ポポポポポ",
-    "popo": "予定2分前、ポポ",
-    "poon": "予定20秒前、ポーン",
-    "pipoon": "予定開始とカウントダウン完了、ピポーン",
-    "pin": "カウントダウン、30分前と20分前、ピン",
-    "pinpin": "10分前と5分前、ピンピン",
-    "pinpinpin": "2分前と1分前、ピンピンピン",
-}
 
 
 def _play_sequence(cues: list[rules.Cue], cfg: Config) -> None:
@@ -218,20 +205,27 @@ def cmd_demo(args: argparse.Namespace, cfg: Config) -> int:
     """時報・予定通知・カウントダウンを、間を詰めて今すぐ鳴らす。"""
     now = datetime.now(cfg.timezone)
     if args.sounds:
-        # 音のパターンを名前付きで 1 つずつ
+        # 設定で使っている音を、どこで使うかの説明付きで 1 つずつ
+        uses: dict[str, list[str]] = {}
+        if cfg.hour_chime.sound:
+            uses.setdefault(cfg.hour_chime.sound, []).append("時報")
+        for kind, specs in (("予定", cfg.event_notice.cues), ("カウントダウン", cfg.countdown.cues)):
+            for s in specs:
+                if s.sound:
+                    uses.setdefault(s.sound, []).append(f"{kind}{rules.spoken_duration(s.before)}")
         cues = []
-        for name, desc in SOUND_NAMES.items():
-            cues.append(rules.Cue("名前", now, None, desc, "demo"))
+        for name, where in uses.items():
+            cues.append(rules.Cue("説明", now, None, "、".join(where), "demo"))
             cues.append(rules.Cue(name, now, name, None, "demo"))
         _play_sequence(cues, cfg)
         return 0
 
-    cfg = replace(cfg, quiet_hours=None, holiday=None)
+    cfg = replace(cfg, hour_chime=replace(cfg.hour_chime, weekday_hours=tuple(range(24))), holiday=HolidayConfig())
     target = next_target(now)
     sample = ical.Event("demo", "テスト", target + timedelta(minutes=30), target + timedelta(minutes=60), False)
     cues = [rules.plan_hour(target, [sample], cfg)]
     cues += rules.plan_event(sample.start, [sample], [sample], cfg)
-    cues += countdown.cues_of(countdown.Countdown(sample.start, cfg.countdown.offsets, label="テスト"), cfg.countdown.with_time)
+    cues += countdown.cues_of(countdown.Countdown(sample.start, label="テスト"), cfg)
     if args.sound_only:
         cues = [replace(c, text=None, reason="sound-only") for c in cues if c.sound]
     _play_sequence(cues, cfg)
@@ -252,7 +246,7 @@ def cmd_events(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_simulate(args: argparse.Namespace, cfg: Config) -> int:
-    """この先 N 時間分の時報を一覧表示する。"""
+    """この先 N 時間分を一覧表示する。"""
     start = window_of(datetime.now(cfg.timezone))[0]
     end = start + timedelta(hours=args.hours)
     events = get_events(cfg, start, args.hours + 2, refresh=args.refresh)
@@ -268,20 +262,20 @@ def cmd_say(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="hourly-chime", description="カレンダー連動の音声時報")
+    p = argparse.ArgumentParser(prog=APP, description="Google カレンダー連動の時報・予定通知・カウントダウン")
     p.add_argument("-c", "--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    c = sub.add_parser("chime", help="この先 5 分間の時報を鳴らす (スケジューラから 5 分ごとに呼ぶ)")
-    c.add_argument("--dry-run", action="store_true", help="鳴らさずに計画だけ表示")
-    c.add_argument("--all", action="store_true", help="鳴らさないものも表示")
-    c.add_argument("--at", help="この時刻に起動したとして判定する (例: 2026-09-28T13:54)")
-    c.set_defaults(func=cmd_chime)
+    r = sub.add_parser("run", help="この先 5 分間の分を鳴らす (スケジューラから 5 分ごとに呼ぶ)")
+    r.add_argument("--dry-run", action="store_true", help="鳴らさずに計画だけ表示")
+    r.add_argument("--all", action="store_true", help="鳴らさないものも表示")
+    r.add_argument("--at", help="この時刻に起動したとして判定する (例: 2026-09-28T13:54)")
+    r.set_defaults(func=cmd_run)
 
     d = sub.add_parser("demo", help="時報・予定通知・カウントダウンを間を詰めて今すぐ鳴らす")
     d.add_argument("--sound-only", action="store_true", help="予定中 (音のみ) の場合を鳴らす")
-    d.add_argument("--sounds", action="store_true", help="音のパターンを名前付きで 1 つずつ鳴らす")
+    d.add_argument("--sounds", action="store_true", help="使っている音を説明付きで 1 つずつ鳴らす")
     d.set_defaults(func=cmd_demo)
 
     e = sub.add_parser("events", help="予定一覧を表示")
@@ -289,16 +283,16 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--refresh", action="store_true", help="キャッシュを無視して取得")
     e.set_defaults(func=cmd_events)
 
-    s = sub.add_parser("simulate", help="この先の時報を一覧表示")
+    s = sub.add_parser("simulate", help="この先の時報・予定通知・カウントダウンを一覧表示")
     s.add_argument("--hours", type=int, default=24)
     s.add_argument("--all", action="store_true", help="鳴らさないものも表示")
     s.add_argument("--refresh", action="store_true")
     s.set_defaults(func=cmd_simulate)
 
-    k = sub.add_parser("countdown", help="指定時刻に向けて 30/20/10/5/2/1 分前に読み上げる")
+    k = sub.add_parser("countdown", help="指定時刻に向けてカウントダウンする")
     k.add_argument("time", nargs="?", help="15:30 / 1530 (今日、過ぎていれば明日) / +45 (45 分後)")
-    k.add_argument("--offsets", help="何分前に鳴らすか (例: 30,10,5)")
     k.add_argument("--label", help="予定名 (読み上げる)")
+    k.add_argument("--offsets", help="countdown.cues のうち何分前だけ鳴らすか (例: 30,10,5)")
     k.add_argument("--list", action="store_true", help="登録済みの一覧")
     k.add_argument("--cancel", nargs="+", metavar="ID", help="取り消す (all で全て)")
     k.set_defaults(func=cmd_countdown)

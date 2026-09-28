@@ -1,5 +1,5 @@
 [project]
-name = "hourly-chime"
+name = "calendar-hourly-chime"
 version = "0.1.0"
 description = "Google カレンダー連動の音声時報 (WSL2 + Windows)"
 readme = "README.md"
@@ -21,4 +21,4 @@ dev = [
 ]
 
 [project.scripts]
-hourly-chime = "hourly_chime.main:main"
+calendar-hourly-chime = "calendar_hourly_chime.main:main"

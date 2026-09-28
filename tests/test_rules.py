@@ -2,11 +2,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from hourly_chime import countdown as cdm
-from hourly_chime.config import load_config, parse_config
-from hourly_chime.ical import Event, parse_events
-from hourly_chime.main import collect, grid_floor, next_target, window_of
-from hourly_chime.rules import plan_event, plan_hour, plan_window
+from calendar_hourly_chime import countdown as cdm
+from calendar_hourly_chime.config import load_config, parse_config
+from calendar_hourly_chime.ical import Event, parse_events
+from calendar_hourly_chime.main import collect, grid_floor, next_target, window_of
+from calendar_hourly_chime.rules import plan_event, plan_hour, resolve
 
 TZ = ZoneInfo("Asia/Tokyo")
 
@@ -18,16 +18,14 @@ CFG = parse_config(
             {"name": "holiday", "url": "z"},
             {"name": "cd", "url": "w", "countdown": True},
         ],
-        "quiet_hours": {"start": "21:00", "end": "08:00"},
+        "hour_chime": {"weekday_hours": list(range(8, 21)), "holiday_hours": [8, 12, 16, 20]},
         "holiday": {
-            "hours": [8, 12, 16, 20],
             "weekdays": ["sat", "sun"],
             "all_day": [
                 {"calendar": "holiday", "description": "^祝日"},
                 {"calendar": "roo", "title": "有休|休暇|休み"},
             ],
         },
-        "countdown": {"offsets": [30, 20, 10, 5, 2, 1]},
     }
 )
 
@@ -85,17 +83,19 @@ def test_hour_chime_sound_only_when_busy():
     assert hour(at(14), [ev("roo", "会議", at(13), at(14))]) == ("pipipipoon", "14時です。")  # 終わっている
 
 
-def test_quiet_hours():
+def test_weekday_hours():
     assert plan_hour(at(21), [], CFG).silent
     assert plan_hour(at(3), [], CFG).silent
     assert hour(at(20), []) == ("pipipipoon", "20時です。")
     assert hour(at(8), []) == ("pipipipoon", "8時です。")
 
 
-def test_quiet_hours_from_unquoted_yaml():
-    # YAML で 21:00 をクォートし忘れると int (1260) になる
-    cfg = parse_config({"quiet_hours": {"start": 1260, "end": 480}})
-    assert plan_hour(at(21), [], cfg).silent
+def test_hour_chime_settings():
+    cfg = parse_config({"hour_chime": {"sound": "pipoon", "text": "{hour}時。", "announce": False, "when_busy": "skip"}})
+    events = [ev("x", "予定", at(14, 30), at(15))]
+    c = plan_hour(at(14), events, cfg)
+    assert (c.sound, c.text) == ("pipoon", "14時。")
+    assert plan_hour(at(14), [ev("x", "会議", at(14), at(15))], cfg).silent  # when_busy: skip
 
 
 def test_untitled_skipped_when_titled_event_at_same_time():
@@ -136,7 +136,7 @@ def test_holiday_kinds_are_identical():
     for day, events in [(3, [HOLIDAY]), (26, sat), (29, vacation)]:
         got = [(h, hour(at(h, day=day), events)) for h in range(24)]
         assert [h for h, (snd, _) in got if snd] == [8, 12, 16, 20], day
-        assert dict(got)[20] == ("pipipipoon", "20時です。")  # quiet_hours より優先
+        assert dict(got)[20] == ("pipipipoon", "20時です。")
 
 
 def test_holiday_announces_until_next_chime():
@@ -222,8 +222,8 @@ def test_hour_chime_wins_over_event_notification():
 
 
 def test_countdown_cues_with_label():
-    cd = cdm.Countdown(at(15, 30), (30, 20, 10, 5, 2, 1), label="出発")
-    got = [(c.at, c.sound, c.text) for c in cdm.cues_of(cd)]
+    cd = cdm.Countdown(at(15, 30), label="出発")
+    got = [(c.at, c.sound, c.text) for c in cdm.cues_of(cd, CFG)]
     assert got == [
         (at(15), "pin", "15時30分の出発まで、あと30分です。"),
         (at(15, 10), "pin", "出発まで、あと20分です。"),
@@ -236,7 +236,7 @@ def test_countdown_cues_with_label():
 
 
 def test_countdown_cues_without_label():
-    got = [c.text for c in cdm.cues_of(cdm.Countdown(at(15, 30), (30, 20, 1)))]
+    got = [c.text for c in cdm.cues_of(cdm.Countdown(at(15, 30), (30, 20, 1)), CFG)]  # offsets で絞る
     assert got == ["15時30分まで、あと30分です。", "あと20分です。", "あと1分です。", "15時30分です。"]
 
 
@@ -260,10 +260,37 @@ def test_countdown_sound_only_during_other_event():
     assert got["CD1分前"] == ("pinpinpin", "出発まで、あと1分です。")  # 15:29 は会議終了
 
 
-def test_countdown_ignores_quiet_and_holiday():
-    cd = cdm.cues_of(cdm.Countdown(at(23), (5,)))
-    merged = cdm.merge(plan_window(at(22, 50), at(23, 5), [], CFG), cd)
-    assert [c.text for c in merged if not c.silent] == ["あと5分です。", "23時です。"]
+def test_countdown_ignores_night_and_holiday():
+    got = [c.text for c in resolve(cdm.cues_of(cdm.Countdown(at(23), (5,)), CFG), CFG) if not c.silent]
+    assert got == ["あと5分です。", "23時です。"]
+
+
+def test_custom_cues_and_priority():
+    cfg = parse_config(
+        {
+            "event_notice": {"cues": [{"before": "1m", "sound": "pin", "text": "{title}、1分前。"}], "when_busy": "normal"},
+            "countdown": {"cues": [{"before": "0s", "sound": "popo", "text": "{title}!"}]},
+            "priority": ["event_notice", "countdown", "hour_chime"],
+        }
+    )
+    e = ev("x", "打合せ", at(15, 1), at(15, 30))
+    other = ev("x", "作業", at(14), at(16))
+    cues = plan_event(e.start, [e], [e, other], cfg)
+    assert [(c.at, c.sound, c.text) for c in cues] == [(at(15), "pin", "打合せ、1分前。")]  # when_busy: normal
+    cd = cdm.cues_of(cdm.Countdown(at(15), label="出発"), cfg)
+    assert [(c.sound, c.text) for c in cd] == [("popo", "出発!")]
+    hour_cue = plan_hour(at(15), [], cfg)
+    got = {c.kind: c.silent for c in resolve([hour_cue, *cues, *cd], cfg)}
+    assert got == {"event_notice": False, "countdown": True, "hour_chime": True}  # event_notice が最優先
+
+
+def test_parse_duration():
+    from calendar_hourly_chime.config import parse_duration
+
+    assert parse_duration("5m") == timedelta(minutes=5)
+    assert parse_duration("20s") == timedelta(seconds=20)
+    assert parse_duration("1h") == timedelta(hours=1)
+    assert parse_duration(0) == timedelta(0)
 
 
 def test_parse_time():
@@ -327,9 +354,15 @@ def test_example_config_parses():
     # YAML 1.1 の罠 (off/on/yes/no が bool になる等) を実ファイルで検出する
     root = Path(__file__).parent.parent
     cfg = load_config(root / "config.example.yaml", root / "secrets.example.yaml")
-    assert cfg.holiday is not None and cfg.holiday.weekdays == {5, 6} and len(cfg.holiday.matchers) == 2
-    assert cfg.quiet_hours is not None and cfg.countdown.dedicated == {"countdown"}
+    assert cfg.holiday.weekdays == {5, 6} and len(cfg.holiday.all_day) == 2
+    assert cfg.hour_chime.weekday_hours == tuple(range(8, 21)) and cfg.hour_chime.holiday_hours == (8, 12, 16, 20)
+    assert cfg.countdown.dedicated == {"countdown"} and len(cfg.countdown.cues) == 7
+    assert [s.before.total_seconds() for s in cfg.event_notice.cues] == [300, 120, 20, 0]
+    assert cfg.priority == ("countdown", "hour_chime", "event_notice")
     assert len(cfg.calendars) == 4
+    # 組み込みの既定値と同じ内容を書いている
+    assert cfg.event_notice.cues == parse_config({}).event_notice.cues
+    assert cfg.countdown.cues == parse_config({}).countdown.cues
 
 
 def test_secret_url_overrides_and_missing_url_skipped():

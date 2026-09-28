@@ -11,7 +11,7 @@ import wave
 from array import array
 from pathlib import Path
 
-from .config import CACHE_DIR
+from .config import CACHE_DIR, SoundOverride
 
 RATE = 24000  # VOICEVOX の既定出力と揃える
 SLOT_CACHE = CACHE_DIR / "slots"
@@ -110,25 +110,35 @@ def _write_wav(path: Path, samples: list[float]) -> None:
     tmp.replace(path)
 
 
-def compose(sound: str | None, voice: Path | None) -> tuple[Path, float]:
-    """音 → (0.3秒) → 読み上げ の wav を作り、(パス, アンカー秒) を返す。"""
+def _resolve(sound: str, overrides: dict[str, SoundOverride]) -> tuple[list[float], float, float | None, str]:
+    """(サンプル, アンカー秒, 読み上げ開始秒, キャッシュ用の識別子)。"""
+    if o := overrides.get(sound):
+        return _read_wav(o.path), o.anchor, None, f"{o.path}|{o.path.stat().st_mtime_ns}|{o.anchor}"
+    if sound not in SOUNDS:
+        raise ValueError(f"未知の音: {sound} (組み込み: {', '.join(SOUNDS)}。sounds で wav を指定できる)")
+    gen, anchor, voice_at = SOUNDS[sound]
+    return gen(), anchor, voice_at, sound
+
+
+def compose(
+    sound: str | None, voice: Path | None, overrides: dict[str, SoundOverride] | None = None
+) -> tuple[Path, float]:
+    """音 → 読み上げ の wav を作り、(パス, アンカー秒) を返す。"""
     if sound is None and voice is None:
         raise ValueError("sound も voice も無い")
-    key = hashlib.sha256(f"{VERSION}|{sound}|{voice.name if voice else ''}".encode()).hexdigest()[:16]
+    samples, anchor, voice_at, ident = _resolve(sound, overrides or {}) if sound else ([], 0.0, None, "")
+    key = hashlib.sha256(f"{VERSION}|{ident}|{voice.name if voice else ''}".encode()).hexdigest()[:16]
     out = SLOT_CACHE / f"{key}.wav"
-    anchor = SOUNDS[sound][1] if sound else 0.0
     if out.exists():
         out.touch()
         return out, anchor
     SLOT_CACHE.mkdir(parents=True, exist_ok=True)
     if sound and voice:
-        s = SOUNDS[sound][0]()
-        voice_at = SOUNDS[sound][2]
         if voice_at is None:
-            voice_at = len(s) / RATE + 0.3
-        buf = _sequence([(0, s), (voice_at, _read_wav(voice))])
+            voice_at = len(samples) / RATE + 0.3
+        buf = _sequence([(0, samples), (voice_at, _read_wav(voice))])
     elif sound:
-        buf = SOUNDS[sound][0]()
+        buf = samples
     else:
         buf = _read_wav(voice)
     _write_wav(out, buf)
