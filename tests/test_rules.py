@@ -60,13 +60,23 @@ def test_weekday_announces_until_next_chime():
     events = [
         ev("roo", "ジム", at(14, 10), at(14, 30)),
         ev("tai", "予定あり", at(14, 30), at(14, 45)),  # 時間枠のみ → 「予定があります」
-        ev("roo", "次の時間", at(15), at(16)),  # 次の時報 (15時) 以降 → 読まない
+        ev("roo", "次の時報ちょうど", at(15), at(16)),  # 次の時報 (15時) ちょうど → 読む
+        ev("roo", "その後", at(15, 1), at(16)),  # 次の時報より後 → 読まない
         ev("roo", "連休", at(0), at(0, day=29), all_day=True),  # 終日 → 無関係
     ]
-    assert hour(at(14), events) == ("pipipipoon", "14時です。14時10分から、ジムです。14時30分から、予定があります。")
+    assert hour(at(14), events) == (
+        "pipipipoon",
+        "14時です。14時10分から、ジムです。14時30分から、予定があります。15時から、次の時報ちょうどです。",
+    )
     # 20時の次の時報は翌朝 8 時
     night = [ev("roo", "夜", at(22), at(23)), ev("roo", "朝", at(8, day=29), at(9, day=29))]
-    assert hour(at(20), night) == ("pipipipoon", "20時です。22時から、夜です。")
+    assert hour(at(20), night) == ("pipipipoon", "20時です。22時から、夜です。8時から、朝です。")
+
+
+def test_hour_chime_next_chime_block_with_titled_event_inside():
+    # 18時の時報で、19時からの tai の枠の中にある 19:25 のジムを読む
+    events = [ev("tai", "予定あり", at(19), at(20)), ev("roo", "ジム", at(19, 25), at(19, 45))]
+    assert hour(at(18), events)[1] == "18時です。19時25分から、ジムです。"
 
 
 def test_hour_chime_sound_only_when_busy():
@@ -99,10 +109,10 @@ def test_untitled_skipped_when_titled_event_at_same_time():
 
 def test_hour_chime_uses_titled_event_inside_untitled_block():
     block = ev("tai", "予定あり", at(14, 30), at(16, 30))
-    lunch = ev("roo", "りうむめし", at(15), at(16))  # tai の枠内、開始は次の時報以降でもよい
-    assert hour(at(14), [block, lunch])[1] == "14時です。15時から、りうむめしです。"
+    lunch = ev("roo", "りうむめし", at(15, 30), at(16))  # tai の枠内、開始は次の時報より後でもよい
+    assert hour(at(14), [block, lunch])[1] == "14時です。15時30分から、りうむめしです。"
     # 枠からはみ出す予定は使わない
-    long = ev("roo", "長い", at(15), at(17))
+    long = ev("roo", "長い", at(15, 30), at(17))
     assert hour(at(14), [block, long])[1] == "14時です。14時30分から、予定があります。"
     # 同じ時間の予定は名前のある方
     same = ev("roo", "会議", at(14, 30), at(16, 30))
@@ -134,11 +144,15 @@ def test_holiday_announces_until_next_chime():
         HOLIDAY,
         ev("roo", "ランチ", hat(12, 30), hat(13, 30)),
         ev("roo", "買い物", hat(15, 50), hat(17)),
-        ev("roo", "夕飯", hat(16), hat(17)),  # 次の時報 (16時) 以降 → 読まない
+        ev("roo", "夕飯", hat(16), hat(17)),  # 次の時報 (16時) ちょうど → 読む
+        ev("roo", "夜", hat(16, 30), hat(17)),  # 次の時報より後 → 読まない
     ]
-    assert hour(hat(12), events) == ("pipipipoon", "12時です。12時30分から、ランチです。15時50分から、買い物です。")
+    assert hour(hat(12), events) == (
+        "pipipipoon",
+        "12時です。12時30分から、ランチです。15時50分から、買い物です。16時から、夕飯です。",
+    )
     late = [HOLIDAY, ev("roo", "早朝", hat(7, day=4), hat(8, day=4)), ev("roo", "朝会", hat(8, day=4), hat(9, day=4))]
-    assert hour(hat(20), late) == ("pipipipoon", "20時です。7時から、早朝です。")  # 20時の次は翌朝 8 時
+    assert hour(hat(20), late) == ("pipipipoon", "20時です。7時から、早朝です。8時から、朝会です。")  # 20時の次は翌朝 8 時
 
 
 def test_holiday_busy_is_sound_only():

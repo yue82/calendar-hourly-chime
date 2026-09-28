@@ -87,13 +87,14 @@ def _describe_group(t: datetime, group: list[Event], cfg: Config) -> list[str]:
 
 
 def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Config) -> str:
-    """start <= 開始 < end の予定の案内文 (時報用)。
+    """start < 開始 <= end の予定の案内文 (時報用。start の正時ちょうどに始まる予定はその最中なので除き、
+    次の時報 end ちょうどに始まる予定は含める)。
     予定名が無い/読めない予定は、その時間内に収まる予定名の分かる予定があればそちらを読み
     (開始が end 以降でもよい)、無ければ「予定があります」とだけ言う。
     同じ時刻に名前のある予定があれば、名前の無い方は省く。"""
     by_start: dict[datetime, list[Event]] = {}
     for e in events:
-        if not e.all_day and start <= e.start < end:
+        if not e.all_day and start < e.start <= end:
             by_start.setdefault(e.start, []).append(e)
     titled = [e for e in events if not e.all_day and readable_title(e, cfg)]
 
@@ -142,7 +143,7 @@ def next_chime(target: datetime, events: list[Event], cfg: Config) -> datetime:
 
 
 def plan_hour(target: datetime, events: list[Event], cfg: Config) -> Cue:
-    """正時 target の時報。ピピピポーン「N時です。」+ 次の時報までに始まる予定。"""
+    """正時 target の時報。ピピピポーン「N時です。」+ 次の時報 (ちょうどを含む) までに始まる予定。"""
     s = HOUR_SLOT
     if reason := chime_skip_reason(target, events, cfg):
         return Cue(s.name, target, None, None, reason)
