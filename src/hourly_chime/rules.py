@@ -1,8 +1,8 @@
 """いつ何を鳴らすか (Cue) を決める。副作用なし。
 
-- 時報: 平日は毎正時、休日は holiday.hours の正時。ピピピポーン「N時です。」+ 次にある予定
-- 予定通知: 予定の 5分前・2分前・15秒前・開始時 (夜間・休日も)。時報と重なったら時報を優先
-鳴らす時刻に (他の) 予定が入っていれば、読み上げずに音だけ鳴らす (予定通知は 5分前と開始時のみ)。
+- 時報: 平日は毎正時、休日は holiday.hours の正時。ピピピポーン「N時です。」+ 次の時報までに始まる予定
+- 予定通知: 予定の 5分前・2分前・20秒前・開始時 (夜間・休日も)。時報と重なったら時報を優先
+鳴らす時刻に (他の) 予定が入っていれば、読み上げずに音だけ鳴らす。
 """
 
 from __future__ import annotations
@@ -23,18 +23,17 @@ class Slot:
     name: str
     offset: timedelta  # 基準時刻からのずれ
     sound: str  # sounds.py の音の名前 (予定中はこれだけ鳴らす)
-    voice: str  # 読み上げ ({hour} {start} が使える)
-    chime_before_voice: bool = False  # 読み上げ時も先に音を鳴らす
-    when_busy: bool = True  # (他の) 予定中にも音だけ鳴らす (False なら鳴らさない)
+    speak: str | None = None  # 何を読むか: None=読まない / "announce"=「H時M分から、〇〇です。」 / "title"=「〇〇です。」
 
 
-HOUR_SLOT = Slot("時報", timedelta(0), "pipipipoon", "{hour}時です。", chime_before_voice=True)
+HOUR_SLOT = Slot("時報", timedelta(0), "pipipipoon")
 
+# 音の回数で残り時間を表す (ポポポポポ=5分前、ポポ=2分前)。開始時は会議が始まっている可能性があるので言葉なし
 EVENT_SLOTS = (
-    Slot("予定5分前", timedelta(minutes=-5), "popopopopo", "5分前です。"),
-    Slot("予定2分前", timedelta(minutes=-2), "popo", "2分前です。", when_busy=False),
-    Slot("予定15秒前", timedelta(seconds=-15), "poon", "15秒前です。", when_busy=False),
-    Slot("予定開始", timedelta(0), "pipoon", "{start}です。", chime_before_voice=True),
+    Slot("予定5分前", timedelta(minutes=-5), "popopopopo", speak="announce"),
+    Slot("予定2分前", timedelta(minutes=-2), "popo"),
+    Slot("予定20秒前", timedelta(seconds=-20), "poon", speak="title"),
+    Slot("予定開始", timedelta(0), "pipoon"),
 )
 
 
@@ -98,60 +97,55 @@ def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Conf
     return "".join(lines[: cfg.announce_max])
 
 
-def next_holiday_chime(target: datetime, hours: tuple[int, ...]) -> datetime:
-    later = [h for h in hours if h > target.hour]
-    if later:
-        return target.replace(hour=later[0])
-    return (target + timedelta(days=1)).replace(hour=hours[0])
+def chime_skip_reason(target: datetime, events: list[Event], cfg: Config) -> str | None:
+    """正時 target に時報を鳴らさないならその理由 (予定中かどうかは見ない)。"""
+    if hol := holiday_reason(target, events, cfg):
+        # 休日: 指定の正時だけ (quiet_hours より優先)
+        return None if target.hour in cfg.holiday.hours else hol
+    if cfg.quiet_hours and cfg.quiet_hours.contains(target.time()):
+        return "quiet_hours"
+    return None
+
+
+def next_chime(target: datetime, events: list[Event], cfg: Config) -> datetime:
+    """target の次に実際に鳴る時報の時刻 (最大 2 日先まで探す)。"""
+    t = target + timedelta(hours=1)
+    for _ in range(48):
+        if chime_skip_reason(t, events, cfg) is None:
+            return t
+        t += timedelta(hours=1)
+    return t
 
 
 def plan_hour(target: datetime, events: list[Event], cfg: Config) -> Cue:
-    """正時 target の時報。"""
+    """正時 target の時報。ピピピポーン「N時です。」+ 次の時報までに始まる予定。"""
     s = HOUR_SLOT
-
-    def skip(reason: str) -> Cue:
+    if reason := chime_skip_reason(target, events, cfg):
         return Cue(s.name, target, None, None, reason)
-
-    if hol := holiday_reason(target, events, cfg):
-        # 休日: 指定の正時だけ、次の時報までの予定を読む (quiet_hours より優先)
-        hours = cfg.holiday.hours
-        if target.hour not in hours:
-            return skip(hol)
-        window = (target, next_holiday_chime(target, hours))
-        reason = hol
-    elif cfg.quiet_hours and cfg.quiet_hours.contains(target.time()):
-        return skip("quiet_hours")
-    else:
-        window = (target + timedelta(hours=1), target + timedelta(hours=2))
-        reason = "平日"
-
     if busy := busy_at(target, events):
         return Cue(s.name, target, s.sound, None, f"予定中 ({busy.calendar}: {busy.title})")
-    text = s.voice.format(hour=target.hour) + announce_text(*window, events, cfg)
+    reason = holiday_reason(target, events, cfg) or "平日"
+    text = f"{target.hour}時です。" + announce_text(target, next_chime(target, events, cfg), events, cfg)
     return Cue(s.name, target, s.sound, text, reason)
 
 
 def plan_event(start: datetime, group: list[Event], events: list[Event], cfg: Config) -> list[Cue]:
     """start に始まる予定 (group) の予定通知。夜間・休日も鳴らす。
-    鳴らす時刻に他の予定が入っていれば、5分前と開始時だけ音のみで鳴らす。"""
-    what = "".join(_describe_group(start, group, cfg))
-    titles = [x for x in (readable_title(e, cfg) for e in group) if x]
+    鳴らす時刻に他の予定が入っていれば音だけ。"""
+    texts = {
+        "announce": "".join(_describe_group(start, group, cfg)),
+        # 予定名が無ければ 20 秒前は音だけ
+        "title": "".join(
+            cfg.event_title_template.format(title=t) for t in (readable_title(e, cfg) for e in group) if t
+        ),
+    }
     cues = []
     for s in EVENT_SLOTS:
         at = start + s.offset
         if other := busy_at(at, events, exclude=group):
-            reason = f"他の予定中 ({other.calendar}: {other.title})"
-            cues.append(Cue(s.name, at, s.sound if s.when_busy else None, None, reason))
+            cues.append(Cue(s.name, at, s.sound, None, f"他の予定中 ({other.calendar}: {other.title})"))
             continue
-        text = s.voice.format(start=spoken_time(start))
-        if s.name == "予定5分前":
-            text += what
-        elif s.offset == timedelta(0):
-            if titles:
-                text += "".join(cfg.event_start_template.format(title=t) for t in titles)
-            else:
-                text += cfg.event_start_untitled_template
-        cues.append(Cue(s.name, at, s.sound if s.chime_before_voice else None, text, "予定通知"))
+        cues.append(Cue(s.name, at, s.sound, texts.get(s.speak) or None, "予定通知"))
     return cues
 
 

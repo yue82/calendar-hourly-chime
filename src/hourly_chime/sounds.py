@@ -15,7 +15,7 @@ from .config import CACHE_DIR
 
 RATE = 24000  # VOICEVOX の既定出力と揃える
 SLOT_CACHE = CACHE_DIR / "slots"
-VERSION = "v2"  # 音を変えたら上げる (キャッシュ無効化)
+VERSION = "v3"  # 音を変えたら上げる (キャッシュ無効化)
 
 
 def _tone(freq: float, dur: float, tau: float | None, amp: float, harmonic: float = 0.0) -> list[float]:
@@ -47,6 +47,10 @@ def _pi_hi() -> list[float]:
     return _tone(1175, 0.15, 0.1, 0.45, harmonic=0.15)
 
 
+def _pin() -> list[float]:
+    return _tone(1568, 0.5, 0.12, 0.4, harmonic=0.3)
+
+
 def _poon_lo() -> list[float]:
     return _tone(784, 2.0, 0.6, 0.5, harmonic=0.15)
 
@@ -69,6 +73,9 @@ SOUNDS = {
     "popopopopo": (lambda: _sequence([(i * 0.1, _po()) for i in range(5)]), 0.0, None),
     "popo": (lambda: _sequence([(i * 0.1, _po()) for i in range(2)]), 0.0, None),
     "poon": (lambda: _poon(), 0.0, None),
+    "pin": (lambda: _pin(), 0.0, None),
+    "pinpin": (lambda: _sequence([(i * 0.22, _pin()) for i in range(2)]), 0.0, None),
+    "pinpinpin": (lambda: _sequence([(i * 0.22, _pin()) for i in range(3)]), 0.0, None),
 }
 
 

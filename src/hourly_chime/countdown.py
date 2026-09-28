@@ -4,7 +4,8 @@
 - コマンド (`hourly-chime countdown 15:30`): STATE_DIR/countdowns.json に保存する
 - カレンダー: countdown: true のカレンダーの予定の開始時刻 (時報・予定通知とは独立)
 
-quiet_hours / 休日 / off_days に関係なく鳴らし、重なった時報より優先する。
+夜間・休日に関係なく鳴らし、重なった時報・予定通知より優先する。
+自分のタスク用なので予定名も読む。他の予定の最中は音だけ。
 """
 
 from __future__ import annotations
@@ -28,26 +29,45 @@ CONFLICT = timedelta(seconds=10)
 class Countdown:
     at: datetime
     offsets: tuple[int, ...]  # 分
+    label: str | None = None  # 予定名 (無ければ時刻だけ)
     id: str = ""
     created: datetime | None = None  # コマンドで登録した時刻 (カレンダー由来は None)
     source: str = "command"
 
 
-def cues_of(cd: Countdown) -> list[Cue]:
+# 残り時間が短いほどピンの回数を増やす
+def _sound(minutes: int) -> str:
+    return "pin" if minutes >= 20 else "pinpin" if minutes >= 5 else "pinpinpin"
+
+
+def _text(cd: Countdown, minutes: int, with_time: bool) -> str:
     t = spoken_time(cd.at)
+    if cd.label and with_time:
+        return f"{t}の{cd.label}まで、あと{minutes}分です。"
+    if cd.label:
+        return f"{cd.label}まで、あと{minutes}分です。"
+    if with_time:
+        return f"{t}まで、あと{minutes}分です。"
+    return f"あと{minutes}分です。"
+
+
+def cues_of(cd: Countdown, with_time: tuple[int, ...] = (30, 10)) -> list[Cue]:
+    """with_time: 時刻も読む「N分前」。"""
     reason = f"カウントダウン ({cd.source}{' ' + cd.id if cd.id else ''})"
     out = [
-        Cue(f"CD{m}分前", cd.at - timedelta(minutes=m), None, f"{t}まで、あと{m}分です。", reason)
+        Cue(f"CD{m}分前", cd.at - timedelta(minutes=m), _sound(m), _text(cd, m, m in with_time), reason)
         for m in sorted(set(cd.offsets), reverse=True)
     ]
-    out.append(Cue("CD時刻", cd.at, "pipoon", f"{t}です。", reason))
+    t = spoken_time(cd.at)
+    done = f"{t}、{cd.label}の時間です。" if cd.label else f"{t}です。"
+    out.append(Cue("CD時刻", cd.at, "pipoon", done, reason))
     return out
 
 
 def from_events(events: list[Event], cfg: Config) -> list[Countdown]:
     """カウントダウン専用カレンダーの予定の開始時刻。"""
     return [
-        Countdown(e.start, cfg.countdown.offsets, source=f"{e.calendar}: {e.title}")
+        Countdown(e.start, cfg.countdown.offsets, label=e.title or None, source=f"{e.calendar}: {e.title}")
         for e in events
         if not e.all_day and e.calendar in cfg.countdown.dedicated
     ]
@@ -71,6 +91,7 @@ def load(path: Path = STORE) -> list[Countdown]:
             Countdown(
                 at=datetime.fromisoformat(r["at"]),
                 offsets=tuple(r["offsets"]),
+                label=r.get("label"),
                 id=r["id"],
                 created=datetime.fromisoformat(r["created"]),
             )
@@ -81,7 +102,13 @@ def load(path: Path = STORE) -> list[Countdown]:
 def save(items: list[Countdown], path: Path = STORE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = [
-        {"id": c.id, "at": c.at.isoformat(), "offsets": list(c.offsets), "created": c.created.isoformat()}
+        {
+            "id": c.id,
+            "at": c.at.isoformat(),
+            "offsets": list(c.offsets),
+            "label": c.label,
+            "created": c.created.isoformat(),
+        }
         for c in sorted(items, key=lambda c: c.at)
     ]
     tmp = path.with_suffix(".tmp")
@@ -89,8 +116,10 @@ def save(items: list[Countdown], path: Path = STORE) -> None:
     tmp.replace(path)
 
 
-def add(at: datetime, offsets: tuple[int, ...], now: datetime, path: Path = STORE) -> Countdown:
-    cd = Countdown(at=at, offsets=offsets, id=secrets.token_hex(3), created=now)
+def add(
+    at: datetime, offsets: tuple[int, ...], now: datetime, path: Path = STORE, label: str | None = None
+) -> Countdown:
+    cd = Countdown(at=at, offsets=offsets, label=label, id=secrets.token_hex(3), created=now)
     save([c for c in load(path) if c.at > now] + [cd], path)
     return cd
 

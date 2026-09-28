@@ -74,6 +74,7 @@ class HolidayMode:
 @dataclass(frozen=True)
 class CountdownConfig:
     offsets: tuple[int, ...] = (30, 20, 10, 5, 2, 1)  # 分前
+    with_time: tuple[int, ...] = (30, 10)  # 時刻も読む「N分前」
     dedicated: frozenset[str] = frozenset()  # countdown: true のカレンダー (全予定が対象)
 
 
@@ -96,9 +97,8 @@ class Config:
     holiday: HolidayMode | None = None
     countdown: CountdownConfig = field(default_factory=CountdownConfig)
     announce_template: str = "{start}から、{title}です。"
-    event_start_template: str = "{title}です。"
+    event_title_template: str = "{title}です。"  # 予定通知 20 秒前
     announce_untitled_template: str = "{start}から、予定があります。"
-    event_start_untitled_template: str = "予定の時間です。"
     announce_max: int = 3
     tts: TTSConfig = field(default_factory=TTSConfig)
     player: str = "windows"  # windows | paplay
@@ -162,6 +162,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
     cd = raw.get("countdown") or {}
     countdown = CountdownConfig(
         offsets=tuple(cd.get("offsets") or CountdownConfig.offsets),
+        with_time=tuple(cd.get("with_time") or CountdownConfig.with_time),
         dedicated=frozenset(c.name for c in calendars if c.countdown),
     )
 
@@ -186,9 +187,8 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         holiday=holiday,
         countdown=countdown,
         announce_template=an.get("template", Config.announce_template),
-        event_start_template=an.get("event_start_template", Config.event_start_template),
+        event_title_template=an.get("event_title_template", Config.event_title_template),
         announce_untitled_template=an.get("untitled_template", Config.announce_untitled_template),
-        event_start_untitled_template=an.get("event_start_untitled_template", Config.event_start_untitled_template),
         announce_max=an.get("max_items", Config.announce_max),
         tts=tts,
         player=raw.get("player", "windows"),

@@ -56,15 +56,17 @@ def test_weekday_hour_chime():
     assert hour(at(14), []) == ("pipipipoon", "14時です。")
 
 
-def test_weekday_announces_next_hour_events():
+def test_weekday_announces_until_next_chime():
     events = [
-        ev("roo", "今の時間台", at(14, 30), at(15)),  # 14時台 → 読まない
-        ev("roo", "ジム", at(15, 10), at(16)),
-        ev("tai", "予定あり", at(15, 30), at(16)),  # 時間枠のみ → 「予定があります」
-        ev("roo", "遠い予定", at(16), at(17)),
+        ev("roo", "ジム", at(14, 10), at(14, 30)),
+        ev("tai", "予定あり", at(14, 30), at(14, 45)),  # 時間枠のみ → 「予定があります」
+        ev("roo", "次の時間", at(15), at(16)),  # 次の時報 (15時) 以降 → 読まない
         ev("roo", "連休", at(0), at(0, day=29), all_day=True),  # 終日 → 無関係
     ]
-    assert hour(at(14), events) == ("pipipipoon", "14時です。15時10分から、ジムです。15時30分から、予定があります。")
+    assert hour(at(14), events) == ("pipipipoon", "14時です。14時10分から、ジムです。14時30分から、予定があります。")
+    # 20時の次の時報は翌朝 8 時
+    night = [ev("roo", "夜", at(22), at(23)), ev("roo", "朝", at(8, day=29), at(9, day=29))]
+    assert hour(at(20), night) == ("pipipipoon", "20時です。22時から、夜です。")
 
 
 def test_hour_chime_sound_only_when_busy():
@@ -88,11 +90,11 @@ def test_quiet_hours_from_unquoted_yaml():
 
 def test_untitled_skipped_when_titled_event_at_same_time():
     events = [
-        ev("roo", "会議", at(15, 30), at(16)),
-        ev("tai", "予定あり", at(15, 30), at(16)),
-        ev("roo", "", at(15, 45), at(16)),
+        ev("roo", "会議", at(14, 30), at(15)),
+        ev("tai", "予定あり", at(14, 30), at(15)),
+        ev("roo", "", at(14, 45), at(15)),
     ]
-    assert hour(at(14), events)[1] == "14時です。15時30分から、会議です。15時45分から、予定があります。"
+    assert hour(at(14), events)[1] == "14時です。14時30分から、会議です。14時45分から、予定があります。"
 
 
 # --- 休日 (曜日・祝日・休み予定を同じ扱い) ---
@@ -145,39 +147,36 @@ def test_event_notifications():
     gym = ev("roo", "ジム", at(19, 25), at(19, 45))
     cues = plan_event(gym.start, [gym], [gym], CFG)
     assert [(c.at, c.sound, c.text) for c in cues] == [
-        (at(19, 20), None, "5分前です。19時25分から、ジムです。"),
-        (at(19, 23), None, "2分前です。"),
-        (at(19, 24, 45), None, "15秒前です。"),
-        (at(19, 25), "pipoon", "19時25分です。ジムです。"),
+        (at(19, 20), "popopopopo", "19時25分から、ジムです。"),
+        (at(19, 23), "popo", None),
+        (at(19, 24, 40), "poon", "ジムです。"),
+        (at(19, 25), "pipoon", None),  # 開始時は言葉なし (会議が始まっているかもしれない)
     ]
 
 
 def test_event_notifications_untitled():
     t = ev("tai", "予定あり", at(10, 30), at(11))
     cues = plan_event(t.start, [t], [t], CFG)
-    assert cues[0].text == "5分前です。10時30分から、予定があります。"
-    assert cues[3].text == "10時30分です。予定の時間です。"
+    assert [(c.sound, c.text) for c in cues] == [
+        ("popopopopo", "10時30分から、予定があります。"),
+        ("popo", None),
+        ("poon", None),  # 予定名が無ければ 20 秒前は音だけ
+        ("pipoon", None),
+    ]
 
 
 def test_event_notifications_sound_only_during_other_event():
-    a = ev("roo", "A", at(14), at(14, 30))
-    b = ev("roo", "B", at(14, 30), at(15))  # 14:25〜14:29:45 は A の最中、14:30 は A 終了
+    a = ev("roo", "A", at(14), at(14, 40))
+    b = ev("roo", "B", at(14, 30), at(15))
     cues = plan_event(b.start, [b], [a, b], CFG)
-    assert [(c.sound, c.text) for c in cues] == [
-        ("popopopopo", None),
-        (None, None),  # 2分前・15秒前は予定中なら鳴らさない
-        (None, None),
-        ("pipoon", "14時30分です。Bです。"),
-    ]
-    c = ev("roo", "C", at(14), at(15))  # 開始時も予定中なら音のみ
-    assert [(x.sound, x.text) for x in plan_event(b.start, [b], [c, b], CFG)][3] == ("pipoon", None)
+    assert [(c.sound, c.text) for c in cues] == [("popopopopo", None), ("popo", None), ("poon", None), ("pipoon", None)]
 
 
 def test_event_notifications_on_holiday_and_quiet_hours():
     hol = [HOLIDAY, ev("roo", "祝日の予定", hat(10, 30), hat(11))]
-    assert not any(c.silent for c in plan_event(hol[1].start, [hol[1]], hol, CFG))
+    assert plan_event(hol[1].start, [hol[1]], hol, CFG)[0].text == "10時30分から、祝日の予定です。"
     late = ev("roo", "夜", at(22, 30), at(23))
-    assert [c.text for c in plan_event(late.start, [late], [late], CFG)][3] == "22時30分です。夜です。"
+    assert plan_event(late.start, [late], [late], CFG)[2].text == "夜です。"
 
 
 def test_hour_chime_wins_over_event_notification():
@@ -187,37 +186,56 @@ def test_hour_chime_wins_over_event_notification():
     assert (at(15), "時報") in labels
     assert (at(15), "予定開始") not in labels  # 会議の開始は時報に負ける
     assert (at(15), "予定5分前") not in labels  # 打合せの 5 分前も時報に負ける
-    assert (at(14, 55), "予定5分前") in labels and (at(14, 59, 45), "予定15秒前") in labels
+    assert (at(14, 55), "予定5分前") in labels and (at(14, 59, 40), "予定20秒前") in labels
     assert (at(15, 5), "予定開始") in labels
 
 
 # --- カウントダウン (専用カレンダー / コマンド、時報・予定通知と独立) ---
 
 
-def test_countdown_cues():
-    got = [(c.at, c.sound, c.text) for c in cdm.cues_of(cdm.Countdown(at(15, 30), (30, 20, 10, 5, 2, 1)))]
-    assert got[0] == (at(15), None, "15時30分まで、あと30分です。")
-    assert got[-2] == (at(15, 29), None, "15時30分まで、あと1分です。")
-    assert got[-1] == (at(15, 30), "pipoon", "15時30分です。")
-    assert len(got) == 7
+def test_countdown_cues_with_label():
+    cd = cdm.Countdown(at(15, 30), (30, 20, 10, 5, 2, 1), label="出発")
+    got = [(c.at, c.sound, c.text) for c in cdm.cues_of(cd)]
+    assert got == [
+        (at(15), "pin", "15時30分の出発まで、あと30分です。"),
+        (at(15, 10), "pin", "出発まで、あと20分です。"),
+        (at(15, 20), "pinpin", "15時30分の出発まで、あと10分です。"),
+        (at(15, 25), "pinpin", "出発まで、あと5分です。"),
+        (at(15, 28), "pinpinpin", "出発まで、あと2分です。"),
+        (at(15, 29), "pinpinpin", "出発まで、あと1分です。"),
+        (at(15, 30), "pipoon", "15時30分、出発の時間です。"),
+    ]
+
+
+def test_countdown_cues_without_label():
+    got = [c.text for c in cdm.cues_of(cdm.Countdown(at(15, 30), (30, 20, 1)))]
+    assert got == ["15時30分まで、あと30分です。", "あと20分です。", "あと1分です。", "15時30分です。"]
 
 
 def test_countdown_calendar_is_independent():
     e = ev("cd", "出発", at(15, 30), at(16, 30))
-    assert [c.at for c in cdm.from_events([e], CFG)] == [at(15, 30)]
+    assert [(c.at, c.label) for c in cdm.from_events([e], CFG)] == [(at(15, 30), "出発")]
     got = audible(at(14, 54, 30), at(16, 5), [e])
-    assert (at(15), "時報", "pipipipoon", "15時です。") not in got  # CD30分前 が 15:00 で優先
+    assert (at(15), "CD30分前", "pin", "15時30分の出発まで、あと30分です。") in got  # 15:00 の時報より優先
+    assert not [g for g in got if g[1] == "時報" and g[0] == at(15)]
     assert (at(16), "時報", "pipipipoon", "16時です。") in got  # 予定中にならない
     assert not [g for g in got if g[1].startswith("予定")]  # 予定通知にならない
-    assert (at(15, 25), "CD5分前", None, "15時30分まで、あと5分です。") in got
-    # 普段のカレンダーの ⏰ は特別扱いしない
-    assert cdm.from_events([ev("roo", "⏰出発", at(15, 30), at(15, 30))], CFG) == []
+    assert cdm.from_events([ev("roo", "⏰出発", at(15, 30), at(15, 30))], CFG) == []  # ⏰ は特別扱いしない
+
+
+def test_countdown_sound_only_during_other_event():
+    cd = ev("cd", "出発", at(15, 30), at(15, 30))
+    mtg = ev("roo", "会議", at(15, 20), at(15, 29))
+    got = {g[1]: (g[2], g[3]) for g in audible(at(15, 4, 30), at(15, 34, 30), [cd, mtg])}
+    assert got["CD10分前"] == ("pinpin", None)
+    assert got["CD5分前"] == ("pinpin", None)
+    assert got["CD1分前"] == ("pinpinpin", "出発まで、あと1分です。")  # 15:29 は会議終了
 
 
 def test_countdown_ignores_quiet_and_holiday():
     cd = cdm.cues_of(cdm.Countdown(at(23), (5,)))
     merged = cdm.merge(plan_window(at(22, 50), at(23, 5), [], CFG), cd)
-    assert [c.text for c in merged if not c.silent] == ["23時まで、あと5分です。", "23時です。"]
+    assert [c.text for c in merged if not c.silent] == ["あと5分です。", "23時です。"]
 
 
 def test_parse_time():
@@ -231,9 +249,9 @@ def test_parse_time():
 
 def test_store_roundtrip(tmp_path):
     p = tmp_path / "cd.json"
-    a = cdm.add(at(15, 30), (10, 5), at(14), p)
+    a = cdm.add(at(15, 30), (10, 5), at(14), p, label="出発")
     cdm.add(at(16), (5,), at(14), p)
-    assert [c.at for c in cdm.load(p)] == [at(15, 30), at(16)]
+    assert [(c.at, c.label) for c in cdm.load(p)] == [(at(15, 30), "出発"), (at(16), None)]
     assert [c.id for c in cdm.remove({a.id}, p)] == [a.id]
     assert [c.at for c in cdm.load(p)] == [at(16)]
     cdm.add(at(17), (5,), at(16, 30), p)  # 過去のものは掃除される
