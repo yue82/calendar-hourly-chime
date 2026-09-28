@@ -52,10 +52,12 @@ def fetch(src: CalendarSource, max_age_minutes: float, timeout: float = 5.0) -> 
         tmp.replace(path)
         return r.content
     except requests.RequestException as e:
+        # URL (非公開 URL やキー入り) をログに残さないよう、エラーの種類だけ記録する
+        err = f"HTTP {e.response.status_code}" if e.response is not None else type(e).__name__
         if path.exists():
-            log.warning("カレンダー %s の取得に失敗、キャッシュを使います: %s", src.name, e)
+            log.warning("カレンダー %s の取得に失敗、キャッシュを使います: %s", src.name, err)
             return path.read_bytes()
-        log.error("カレンダー %s の取得に失敗 (キャッシュ無し): %s", src.name, e)
+        log.error("カレンダー %s の取得に失敗 (キャッシュ無し): %s", src.name, err)
         return None
 
 
