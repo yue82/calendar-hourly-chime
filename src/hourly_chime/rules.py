@@ -1,8 +1,8 @@
 """いつ何を鳴らすか (Cue) を決める。副作用なし。
 
 - 時報: 平日は毎正時、休日は holiday.hours の正時。ピピピポーン「N時です。」+ 次にある予定
-- 予定通知: 予定の 5分前・2分前・15秒前・開始時。時報と重なったら時報を優先
-鳴らす時刻に (他の) 予定が入っていれば、読み上げずに音だけ鳴らす。
+- 予定通知: 予定の 5分前・2分前・15秒前・開始時 (夜間・休日も)。時報と重なったら時報を優先
+鳴らす時刻に (他の) 予定が入っていれば、読み上げずに音だけ鳴らす (予定通知は 5分前と開始時のみ)。
 """
 
 from __future__ import annotations
@@ -25,14 +25,15 @@ class Slot:
     sound: str  # sounds.py の音の名前 (予定中はこれだけ鳴らす)
     voice: str  # 読み上げ ({hour} {start} が使える)
     chime_before_voice: bool = False  # 読み上げ時も先に音を鳴らす
+    when_busy: bool = True  # (他の) 予定中にも音だけ鳴らす (False なら鳴らさない)
 
 
 HOUR_SLOT = Slot("時報", timedelta(0), "pipipipoon", "{hour}時です。", chime_before_voice=True)
 
 EVENT_SLOTS = (
     Slot("予定5分前", timedelta(minutes=-5), "popopopopo", "5分前です。"),
-    Slot("予定2分前", timedelta(minutes=-2), "popo", "2分前です。"),
-    Slot("予定15秒前", timedelta(seconds=-15), "poon", "15秒前です。"),
+    Slot("予定2分前", timedelta(minutes=-2), "popo", "2分前です。", when_busy=False),
+    Slot("予定15秒前", timedelta(seconds=-15), "poon", "15秒前です。", when_busy=False),
     Slot("予定開始", timedelta(0), "pipoon", "{start}です。", chime_before_voice=True),
 )
 
@@ -131,17 +132,16 @@ def plan_hour(target: datetime, events: list[Event], cfg: Config) -> Cue:
 
 
 def plan_event(start: datetime, group: list[Event], events: list[Event], cfg: Config) -> list[Cue]:
-    """start に始まる予定 (group) の予定通知。鳴らす時刻に他の予定が入っていれば音だけ。"""
-    if cfg.quiet_hours and cfg.quiet_hours.contains(start.time()):
-        return [Cue(s.name, start + s.offset, None, None, "quiet_hours") for s in EVENT_SLOTS]
-
+    """start に始まる予定 (group) の予定通知。夜間・休日も鳴らす。
+    鳴らす時刻に他の予定が入っていれば、5分前と開始時だけ音のみで鳴らす。"""
     what = "".join(_describe_group(start, group, cfg))
     titles = [x for x in (readable_title(e, cfg) for e in group) if x]
     cues = []
     for s in EVENT_SLOTS:
         at = start + s.offset
         if other := busy_at(at, events, exclude=group):
-            cues.append(Cue(s.name, at, s.sound, None, f"他の予定中 ({other.calendar}: {other.title})"))
+            reason = f"他の予定中 ({other.calendar}: {other.title})"
+            cues.append(Cue(s.name, at, s.sound if s.when_busy else None, None, reason))
             continue
         text = s.voice.format(start=spoken_time(start))
         if s.name == "予定5分前":

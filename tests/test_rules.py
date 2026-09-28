@@ -165,17 +165,19 @@ def test_event_notifications_sound_only_during_other_event():
     cues = plan_event(b.start, [b], [a, b], CFG)
     assert [(c.sound, c.text) for c in cues] == [
         ("popopopopo", None),
-        ("popo", None),
-        ("poon", None),
+        (None, None),  # 2分前・15秒前は予定中なら鳴らさない
+        (None, None),
         ("pipoon", "14時30分です。Bです。"),
     ]
+    c = ev("roo", "C", at(14), at(15))  # 開始時も予定中なら音のみ
+    assert [(x.sound, x.text) for x in plan_event(b.start, [b], [c, b], CFG)][3] == ("pipoon", None)
 
 
-def test_event_notifications_on_holiday_but_not_quiet_hours():
+def test_event_notifications_on_holiday_and_quiet_hours():
     hol = [HOLIDAY, ev("roo", "祝日の予定", hat(10, 30), hat(11))]
     assert not any(c.silent for c in plan_event(hol[1].start, [hol[1]], hol, CFG))
     late = ev("roo", "夜", at(22, 30), at(23))
-    assert all(c.silent for c in plan_event(late.start, [late], [late], CFG))
+    assert [c.text for c in plan_event(late.start, [late], [late], CFG)][3] == "22時30分です。夜です。"
 
 
 def test_hour_chime_wins_over_event_notification():
