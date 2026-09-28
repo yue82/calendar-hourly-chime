@@ -38,17 +38,18 @@ def test_no_events_in_hour_only_on_the_hour():
     assert summary(at(14), []) == [(None, None), (None, None), (None, None), ("pipipipoon", "14時です。")]
 
 
-def test_events_in_hour_full_sequence():
-    events = [ev("roo", "歯医者", at(14, 40), at(15))]
+def test_event_starting_on_the_hour_full_sequence():
+    events = [ev("roo", "会議", at(14), at(15)), ev("roo", "歯医者", at(14, 40), at(15))]
     assert summary(at(14), events) == [
-        (None, "14時5分前です。14時40分から、歯医者です。"),
+        (None, "14時5分前です。14時から、会議です。14時40分から、歯医者です。"),
         (None, "2分前です。"),
         (None, "15秒前です。"),
-        ("pipipipoon", "14時です。"),
+        ("pipipipoon", None),  # 14:00 は会議中
     ]
     plans = plan_hour(at(14), events, CFG)
     assert [p.at for p in plans] == [at(13, 55), at(13, 58), at(13, 59, 45), at(14)]
-    # 翌時台の予定だけでは N 時台の予定にならない
+    # N:00 ちょうどでない予定・翌時台の予定では正時のみ
+    assert summary(at(14), [ev("roo", "x", at(14, 40), at(15))])[0] == (None, None)
     assert summary(at(14), [ev("roo", "x", at(15), at(16))])[0] == (None, None)
 
 
@@ -65,11 +66,11 @@ def test_quiet_hours_from_unquoted_yaml():
 
 
 def test_event_spanning_hour_sound_only():
-    # 14時台に始まる予定が無ければ正時の音だけ
+    # 長い予定の中では正時の音だけ
     events = [ev("roo", "作業", at(13), at(15))]
     assert summary(at(14), events) == [(None, None), (None, None), (None, None), ("pipipipoon", None)]
-    # 14時台に始まる予定もあれば、4 回とも音のみ
-    events.append(ev("roo", "打合せ", at(14, 30), at(15)))
+    # 14:00 に始まる予定もあれば、4 回とも音のみ
+    events.append(ev("roo", "打合せ", at(14), at(15)))
     assert summary(at(14), events) == [
         ("popopopopo", None),
         ("popo", None),
@@ -95,7 +96,7 @@ def test_event_starting_on_the_hour():
 
 
 def test_event_ending_on_the_hour_is_not_busy():
-    events = [ev("roo", "会議", at(13), at(14)), ev("roo", "次", at(14, 30), at(15))]
+    events = [ev("roo", "会議", at(13), at(14)), ev("roo", "リマインド", at(14), at(14))]  # 長さ 0 の予定
     s = summary(at(14), events)
     assert s[0] == ("popopopopo", None)  # 13:55 は予定中
     assert s[3] == ("pipipipoon", "14時です。")  # 14:00 は終わっている
@@ -103,6 +104,7 @@ def test_event_ending_on_the_hour_is_not_busy():
 
 def test_announce_this_hour_at_5min_and_next_hour_on_the_hour():
     events = [
+        ev("roo", "リマインド", at(14), at(14)),
         ev("roo", "歯医者", at(14, 30), at(15)),
         ev("roo", "ジム", at(15, 10), at(16)),
         ev("roo", "遠い予定", at(16), at(17)),
@@ -110,13 +112,21 @@ def test_announce_this_hour_at_5min_and_next_hour_on_the_hour():
         ev("roo", "連休", at(0), at(0, day=29), all_day=True),  # 終日 → 無関係
     ]
     s = summary(at(14), events)
-    assert s[0] == (None, "14時5分前です。14時30分から、歯医者です。")
+    assert s[0] == (None, "14時5分前です。14時から、リマインドです。14時30分から、歯医者です。")
     assert s[3] == ("pipipipoon", "14時です。15時10分から、ジムです。15時30分から、予定があります。")
 
 
 def test_untitled_skipped_when_titled_event_at_same_time():
-    events = [ev("roo", "会議", at(14, 30), at(15)), ev("tai", "予定あり", at(14, 30), at(15)), ev("roo", "", at(14, 45), at(15))]
-    assert summary(at(14), events)[0] == (None, "14時5分前です。14時30分から、会議です。14時45分から、予定があります。")
+    events = [
+        ev("tai", "予定あり", at(14), at(14)),
+        ev("roo", "会議", at(14, 30), at(15)),
+        ev("tai", "予定あり", at(14, 30), at(15)),
+        ev("roo", "", at(14, 45), at(15)),
+    ]
+    assert summary(at(14), events)[0] == (
+        None,
+        "14時5分前です。14時から、予定があります。14時30分から、会議です。14時45分から、予定があります。",
+    )
 
 
 HOLIDAY = Event("holiday", "文化の日", at(0, day=3), at(0, day=4), True, "祝日")
@@ -279,7 +289,11 @@ def test_window_of():
 
 
 def test_plan_window_partitions_all_cues():
-    events = [ev("roo", "ジム", at(14, 1), at(14, 30)), ev("roo", "会議", at(14, 57), at(15, 30))]
+    events = [
+        ev("roo", "朝会", at(14), at(14)),
+        ev("roo", "ジム", at(14, 1), at(14, 30)),
+        ev("roo", "会議", at(14, 57), at(15, 30)),
+    ]
     start = at(13, 54, 30)
     got = []
     for i in range(14):  # 13:54:30 から 70 分
@@ -353,8 +367,8 @@ def test_countdown_from_calendar_event_and_not_event_cues():
     assert [c.at for c in cds] == [at(15, 30)]
     # 通常の予定 Cue (2分前等) は出さない
     assert not [c for c in plan_window(at(15, 20), at(15, 35), [e], CD_CFG) if not c.silent]
-    # 5分前の案内では印を外して読む
-    assert summary_cfg(at(15), [e], CD_CFG)[0][1] == "15時5分前です。15時30分から、出発です。"
+    # 案内では印を外して読む (14時の正時で 15時台の予定として)
+    assert summary_cfg(at(14), [e], CD_CFG)[3][1] == "14時です。15時30分から、出発です。"
 
 
 def test_countdown_ignores_quiet_hours():
