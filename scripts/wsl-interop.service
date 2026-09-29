@@ -1,0 +1,17 @@
+# WSL の interop (Linux から Windows の .exe を起動する機能) を起動後に登録し直す。
+# systemd が /proc/sys/fs/binfmt_misc をマウントし直すと、WSL が登録した WSLInterop が見えなくなり
+# powershell.exe などが "exec format error" になることがあるため。
+#
+#   sudo cp scripts/wsl-interop.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wsl-interop.service
+[Unit]
+Description=Register WSL interop binfmt entry
+After=proc-sys-fs-binfmt_misc.mount systemd-binfmt.service
+ConditionPathExists=!/proc/sys/fs/binfmt_misc/WSLInterop
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo ":WSLInterop:M::MZ::/init:PF" > /proc/sys/fs/binfmt_misc/register'
+
+[Install]
+WantedBy=multi-user.target

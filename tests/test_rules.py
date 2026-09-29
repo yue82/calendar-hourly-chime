@@ -408,3 +408,14 @@ def test_parse_ics_recurring_allday_cancelled():
     assert (mtg.start, mtg.end, mtg.all_day) == (at(14), at(15), False)
     off = titles["有給"]
     assert off.all_day and off.start == at(0) and off.end == at(0, day=29)
+
+
+def test_windows_script_one_item_per_add():
+    # 要素 1 つでも配列が展開されないよう、1 件ずつ ArrayList に足している
+    from calendar_hourly_chime.player import Scheduled, windows_script
+
+    one = windows_script([Scheduled(Path("a.wav"), 1.5, "時報")], [r"\\wsl\a.wav"])
+    assert "[void]$items.Add(@('\\\\wsl\\a.wav', 1500, '時報'))" in one
+    assert "$items = @(" not in one
+    two = windows_script([Scheduled(Path("a"), 1, "x"), Scheduled(Path("b"), 2, "y")], ["a", "b"])
+    assert two.count("[void]$items.Add(") == 2

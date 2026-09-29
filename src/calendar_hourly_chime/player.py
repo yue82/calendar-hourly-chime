@@ -39,16 +39,15 @@ def play_scheduled(items: list[Scheduled], player: str) -> None:
         raise ValueError(f"未知の player: {player}")
 
 
-def _play_windows(items: list[Scheduled]) -> None:
-    # 1 プロセスで全項目を順に待って鳴らす。待ちは Windows 側の時計で行う
-    # (WSL2 の時計はスリープ復帰後などにずれることがあるため)
-    rows = ",\n".join(
-        f"@({ps_quote(to_windows_path(i.path))}, {int(i.at * 1000)}, {ps_quote(i.label)})" for i in items
+def windows_script(items: list[Scheduled], paths: list[str]) -> str:
+    """paths: items の Windows 形式のパス。"""
+    # @(@(a, b, c)) と書くと要素 1 つのときに内側が展開されてしまうので、ArrayList に 1 件ずつ足す
+    adds = "\n".join(
+        f"[void]$items.Add(@({ps_quote(path)}, {int(i.at * 1000)}, {ps_quote(i.label)}))" for i, path in zip(items, paths)
     )
-    script = f"""
-$items = @(
-{rows}
-)
+    return f"""
+$items = New-Object System.Collections.ArrayList
+{adds}
 foreach ($it in $items) {{
     $p = New-Object System.Media.SoundPlayer $it[0]
     $p.Load()
@@ -63,6 +62,12 @@ foreach ($it in $items) {{
     $p.Dispose()
 }}
 """
+
+
+def _play_windows(items: list[Scheduled]) -> None:
+    # 1 プロセスで全項目を順に待って鳴らす。待ちは Windows 側の時計で行う
+    # (WSL2 の時計はスリープ復帰後などにずれることがあるため)
+    script = windows_script(items, [to_windows_path(i.path) for i in items])
     span = max(i.at for i in items) - time.time()
     out = run_powershell(script, timeout=max(span, 0) + 120)
     for line in out.splitlines():

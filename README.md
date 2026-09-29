@@ -67,6 +67,14 @@ uv run calendar-hourly-chime simulate --hours 24  # この先の予定を確認
 powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w scripts/install_task.ps1)"
 ```
 
+WSL で systemd を使っていると、起動後に interop (WSL から `.exe` を起動する機能) の登録が見えなくなり
+`powershell.exe` が `exec format error` になることがある。起動のたびに登録し直すサービスを入れておく:
+
+```sh
+sudo cp scripts/wsl-interop.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now wsl-interop.service
+```
+
 削除は `install_task.ps1 -Uninstall`。
 
 空き時間情報しか共有されていないカレンダー (会社アカウント等) は、共有先のアカウントで
