@@ -121,6 +121,32 @@ def test_hour_chime_uses_titled_event_inside_untitled_block():
     assert plan_event(block.start, [block], [block, lunch], CFG)[0].text == "14時30分から、予定があります。"
 
 
+def test_weekday_pre_cue():
+    got = audible(at(13, 54, 30), at(14, 0, 30), [])
+    assert [(t, lbl, snd, txt) for t, lbl, snd, txt in got] == [
+        (at(13, 55), "時報5分前", "popopopopo", None),
+        (at(14), "時報", "pipipipoon", "14時です。"),
+    ]
+    assert not audible(at(20, 54, 30), at(21, 0, 30), [])  # 21時は時報なし → 5分前もなし
+    assert audible(at(7, 54, 30), at(7, 59, 30), [])[0][1] == "時報5分前"  # 8時の分は 7:55
+
+
+def test_pre_cue_not_on_holiday():
+    assert [g[1] for g in audible(at(11, 54, day=3), at(12, 0, 30, day=3), [HOLIDAY])] == ["時報"]
+
+
+def test_event_notice_wins_over_pre_cue():
+    e = ev("roo", "会議", at(14), at(15))
+    got = [(t, lbl, txt) for t, lbl, _, txt in audible(at(13, 54, 30), at(13, 56), [e])]
+    assert got == [(at(13, 55), "予定5分前", "14時から、会議です。")]
+
+
+def test_priority_missing_kinds_appended():
+    assert parse_config({"priority": ["event_notice"]}).priority == (
+        "event_notice", "countdown", "hour_chime", "hour_chime_pre"
+    )
+
+
 # --- 休日 (曜日・祝日・休み予定を同じ扱い) ---
 
 HOLIDAY = ev("holiday", "文化の日", at(0, day=3), at(0, day=4), True, "祝日")  # 9/3 は木曜
@@ -358,7 +384,8 @@ def test_example_config_parses():
     assert cfg.hour_chime.weekday_hours == tuple(range(8, 21)) and cfg.hour_chime.holiday_hours == (8, 12, 16, 20)
     assert cfg.countdown.dedicated == {"countdown"} and len(cfg.countdown.cues) == 7
     assert [s.before.total_seconds() for s in cfg.event_notice.cues] == [300, 120, 20, 0]
-    assert cfg.priority == ("countdown", "hour_chime", "event_notice")
+    assert cfg.priority == ("countdown", "hour_chime", "event_notice", "hour_chime_pre")
+    assert cfg.hour_chime == parse_config({}).hour_chime
     assert len(cfg.calendars) == 4
     # 組み込みの既定値と同じ内容を書いている
     assert cfg.event_notice.cues == parse_config({}).event_notice.cues

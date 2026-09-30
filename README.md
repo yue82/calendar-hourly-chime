@@ -8,8 +8,8 @@ Google カレンダー (iCal) と連動する時報・予定通知・カウン�
 
 | | いつ | 内容 |
 |---|---|---|
-| 平日 | `weekday_hours` の正時 (8〜20時) | ピピピポーン「N時です。」+ N:01〜次の時報ちょうどに始まる予定 |
-| 休日 | `holiday_hours` の正時 (8・12・16・20時) | 同上 |
+| 平日 | `weekday_hours` の正時 (8〜20時) | 5分前にポポポポポ (`weekday_pre_cues`)、正時にピピピポーン「N時です。」+ N:01〜次の時報ちょうどに始まる予定 |
+| 休日 | `holiday_hours` の正時 (8・12・16・20時) | 正時のみ (`holiday_pre_cues` は空) |
 
 - 休日 = `holiday.weekdays` の曜日、または `holiday.all_day` の条件に合う終日予定がある日 (祝日・有休など)
 - 「次の時報」は実際に次に鳴る時報 (20時の次は翌朝8時)
@@ -46,7 +46,7 @@ Google カレンダー (iCal) と連動する時報・予定通知・カウン�
 ### 共通
 
 - 「予定中」= その時刻に終日以外の予定が入っている (カウントダウン専用カレンダーを除く)
-- `conflict_seconds` (10 秒) 以内に重なったら `priority` の順に残す (既定: カウントダウン > 時報 > 予定通知)
+- `conflict_seconds` (10 秒) 以内に重なったら `priority` の順に残す (既定: カウントダウン > 時報 > 予定通知 > 時報の5分前)
 - 音は組み込み (pipipipoon pipoon popopopopo popo poon pin pinpin pinpinpin) か、`sounds` で wav に差し替え
 
 ```

@@ -24,7 +24,7 @@ CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / APP
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / APP
 
 WHEN_BUSY = ("sound_only", "skip", "normal")
-KINDS = ("hour_chime", "event_notice", "countdown")
+KINDS = ("countdown", "hour_chime", "event_notice", "hour_chime_pre")  # 既定の優先順
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
             "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6}
 
@@ -70,6 +70,9 @@ class HourChimeConfig:
     text: str = "{hour}時です。"
     announce: bool = True  # 次の時報までに始まる予定を続けて読む
     when_busy: str = "sound_only"
+    # 正時より前に鳴らすもの (text では {hour} が使える)。予定中の扱いは when_busy
+    weekday_pre_cues: tuple[CueSpec, ...] = (_c("5m", "popopopopo"),)
+    holiday_pre_cues: tuple[CueSpec, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -159,7 +162,7 @@ class Config:
     event_notice: EventNoticeConfig = field(default_factory=EventNoticeConfig)
     countdown: CountdownConfig = field(default_factory=CountdownConfig)
     announce: AnnounceConfig = field(default_factory=AnnounceConfig)
-    priority: tuple[str, ...] = ("countdown", "hour_chime", "event_notice")
+    priority: tuple[str, ...] = KINDS
     conflict: timedelta = timedelta(seconds=10)
     sounds: dict[str, SoundOverride] = field(default_factory=dict)
     tts: TTSConfig = field(default_factory=TTSConfig)
@@ -222,6 +225,8 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         text=hc.get("text", d.text),
         announce=bool(hc.get("announce", d.announce)),
         when_busy=_when_busy(hc.get("when_busy"), "hour_chime"),
+        weekday_pre_cues=_cues(hc.get("weekday_pre_cues"), d.weekday_pre_cues),
+        holiday_pre_cues=_cues(hc.get("holiday_pre_cues"), d.holiday_pre_cues),
     )
 
     hd = raw.get("holiday") or {}
@@ -261,9 +266,10 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         max_items=an.get("max_items", AnnounceConfig.max_items),
     )
 
-    priority = tuple(raw.get("priority") or Config.priority)
-    if sorted(priority) != sorted(KINDS):
-        raise ValueError(f"priority は {', '.join(KINDS)} を 1 つずつ並べる: {priority}")
+    priority = tuple(raw.get("priority") or ())
+    if unknown := set(priority) - set(KINDS):
+        raise ValueError(f"priority に不明な種類: {sorted(unknown)} (使えるもの: {', '.join(KINDS)})")
+    priority += tuple(k for k in KINDS if k not in priority)  # 書かれていない種類は既定の順で後ろに
 
     sounds = {}
     for name, v in (raw.get("sounds") or {}).items():
