@@ -24,7 +24,7 @@ CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / APP
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / APP
 
 WHEN_BUSY = ("sound_only", "skip", "normal")
-KINDS = ("countdown", "hour_chime", "event_notice", "hour_chime_pre")  # 既定の優先順
+KINDS = ("countdown", "event_notice", "hour_chime", "hour_chime_pre")  # 既定の優先順
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
             "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6}
 

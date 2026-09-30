@@ -10,7 +10,7 @@ from calendar_hourly_chime.rules import plan_event, plan_hour, resolve
 
 TZ = ZoneInfo("Asia/Tokyo")
 
-CFG = parse_config(
+RAW = (
     {
         "calendars": [
             {"name": "roo", "url": "x"},
@@ -28,6 +28,7 @@ CFG = parse_config(
         },
     }
 )
+CFG = parse_config(RAW)
 
 
 def at(h: int, m: int = 0, s: int = 0, day: int = 28) -> datetime:
@@ -233,13 +234,23 @@ def test_event_notifications_on_holiday_and_quiet_hours():
     assert plan_event(late.start, [late], [late], CFG)[2].text == "夜です。"
 
 
-def test_hour_chime_wins_over_event_notification():
+def test_event_notification_wins_over_hour_chime():
+    events = [ev("roo", "会議", at(15), at(16))]
+    got = [(t, lbl, snd, txt) for t, lbl, snd, txt in audible(at(14, 59, 30), at(15, 1), events)]
+    assert got == [(at(14, 59, 40), "予定20秒前", "poon", "会議です。"), (at(15), "予定開始", "pipoon", None)]
+    events = [ev("roo", "打合せ", at(15, 5), at(15, 30))]
+    got = [(t, lbl, txt) for t, lbl, _, txt in audible(at(14, 59, 30), at(15, 1), events)]
+    assert got == [(at(15), "予定5分前", "15時5分から、打合せです。")]  # 時報は鳴らない
+
+
+def test_hour_chime_priority_configurable():
+    cfg = parse_config({**RAW, "priority": ["countdown", "hour_chime", "event_notice"]})
     events = [ev("roo", "会議", at(15), at(16)), ev("roo", "打合せ", at(15, 5), at(15, 30))]
-    got = audible(at(14, 54, 30), at(15, 6), events)
+    got = audible(at(14, 54, 30), at(15, 6), events, cfg)
     labels = [(t, lbl) for t, lbl, _, _ in got]
     assert (at(15), "時報") in labels
-    assert (at(15), "予定開始") not in labels  # 会議の開始は時報に負ける
-    assert (at(15), "予定5分前") not in labels  # 打合せの 5 分前も時報に負ける
+    assert (at(15), "予定開始") not in labels
+    assert (at(15), "予定5分前") not in labels
     assert (at(14, 55), "予定5分前") in labels and (at(14, 59, 40), "予定20秒前") in labels
     assert (at(15, 5), "予定開始") in labels
 
@@ -384,7 +395,7 @@ def test_example_config_parses():
     assert cfg.hour_chime.weekday_hours == tuple(range(8, 21)) and cfg.hour_chime.holiday_hours == (8, 12, 16, 20)
     assert cfg.countdown.dedicated == {"countdown"} and len(cfg.countdown.cues) == 7
     assert [s.before.total_seconds() for s in cfg.event_notice.cues] == [300, 120, 20, 0]
-    assert cfg.priority == ("countdown", "hour_chime", "event_notice", "hour_chime_pre")
+    assert cfg.priority == ("countdown", "event_notice", "hour_chime", "hour_chime_pre")
     assert cfg.hour_chime == parse_config({}).hour_chime
     assert len(cfg.calendars) == 4
     # 組み込みの既定値と同じ内容を書いている

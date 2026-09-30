@@ -70,7 +70,7 @@ countdown:
     - {before: 0s, sound: pipoon, text: "{time}、{title}の時間です。", text_untitled: "{time}です。"}
 
 # 重なったとき (conflict_seconds 以内) に残す順 (hour_chime_pre = 時報の pre_cues)
-priority: [countdown, hour_chime, event_notice, hour_chime_pre]
+priority: [countdown, event_notice, hour_chime, hour_chime_pre]
 conflict_seconds: 10
 
 # 時報で読む予定案内

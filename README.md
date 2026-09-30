@@ -46,7 +46,7 @@ Google カレンダー (iCal) と連動する時報・予定通知・カウン�
 ### 共通
 
 - 「予定中」= その時刻に終日以外の予定が入っている (カウントダウン専用カレンダーを除く)
-- `conflict_seconds` (10 秒) 以内に重なったら `priority` の順に残す (既定: カウントダウン > 時報 > 予定通知 > 時報の5分前)
+- `conflict_seconds` (10 秒) 以内に重なったら `priority` の順に残す (既定: カウントダウン > 予定通知 > 時報 > 時報の5分前)
 - 音は組み込み (pipipipoon pipoon popopopopo popo poon pin pinpin pinpinpin) か、`sounds` で wav に差し替え
 
 ```
