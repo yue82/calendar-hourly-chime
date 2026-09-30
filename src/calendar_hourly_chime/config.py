@@ -24,7 +24,7 @@ CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / APP
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / APP
 
 WHEN_BUSY = ("sound_only", "skip", "normal")
-KINDS = ("countdown", "event_notice", "hour_chime", "hour_chime_pre")  # 既定の優先順
+KINDS = ("countdown", "event_notice", "hour_chime")  # 既定の優先順
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
             "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6}
 
@@ -70,9 +70,8 @@ class HourChimeConfig:
     text: str = "{hour}時です。"
     announce: bool = True  # 次の時報までに始まる予定を続けて読む
     when_busy: str = "sound_only"
-    # 正時より前に鳴らすもの (text では {hour} が使える)。予定中の扱いは when_busy
+    # 平日に正時より前に鳴らすもの (text では {hour} が使える)。予定中の扱いは when_busy
     weekday_pre_cues: tuple[CueSpec, ...] = (_c("5m", "popopopopo"),)
-    holiday_pre_cues: tuple[CueSpec, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -226,7 +225,6 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         announce=bool(hc.get("announce", d.announce)),
         when_busy=_when_busy(hc.get("when_busy"), "hour_chime"),
         weekday_pre_cues=_cues(hc.get("weekday_pre_cues"), d.weekday_pre_cues),
-        holiday_pre_cues=_cues(hc.get("holiday_pre_cues"), d.holiday_pre_cues),
     )
 
     hd = raw.get("holiday") or {}

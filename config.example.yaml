@@ -1,7 +1,7 @@
 # ~/.config/calendar-hourly-chime/config.yaml にコピーして使う
 #
 # 時報       : hour_chime.weekday_hours (休日は holiday_hours) の正時に、音 + text + 次の時報までに始まる予定
-#              (weekday_pre_cues / holiday_pre_cues で正時より前にも鳴らせる)
+#              (平日は weekday_pre_cues で正時より前にも鳴らせる)
 # 予定通知   : 全予定の開始時刻に向けて event_notice.cues (夜間・休日も)
 # カウントダウン: countdown: true のカレンダーの予定とコマンドの指定時刻に向けて countdown.cues
 # 鳴らす時刻に (他の) 予定が入っていれば各 when_busy に従う: sound_only (音だけ) / skip (鳴らさない) / normal
@@ -33,10 +33,9 @@ hour_chime:
   text: "{hour}時です。"
   announce: true  # 続けて N:01〜次の時報ちょうどに始まる予定を読む (announce の文面)
   when_busy: sound_only
-  # 正時より前に鳴らすもの (text では {hour} が使える)
+  # 平日に正時より前に鳴らすもの (text では {hour} が使える)
   weekday_pre_cues:
     - {before: 5m, sound: popopopopo}
-  holiday_pre_cues: []
 
 # 休日の判定: weekdays の曜日、または all_day の条件に合う終日予定がある日
 holiday:
@@ -69,8 +68,8 @@ countdown:
     - {before: 1m, sound: pinpinpin, text: "{title}まで、あと{n}分です。", text_untitled: "あと{n}分です。"}
     - {before: 0s, sound: pipoon, text: "{time}、{title}の時間です。", text_untitled: "{time}です。"}
 
-# 重なったとき (conflict_seconds 以内) に残す順 (hour_chime_pre = 時報の pre_cues)
-priority: [countdown, event_notice, hour_chime, hour_chime_pre]
+# 重なったとき (conflict_seconds 以内) に残す順
+priority: [countdown, event_notice, hour_chime]
 conflict_seconds: 10
 
 # 時報で読む予定案内

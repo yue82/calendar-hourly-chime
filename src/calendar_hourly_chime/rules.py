@@ -2,7 +2,7 @@
 
 タイミング・音・文面は設定 (CueSpec) から組み立てる。ここにあるのは仕組みだけ:
 - 時報: 平日は hour_chime.weekday_hours、休日は holiday_hours の正時。次の時報までに始まる予定を案内
-  (正時より前の weekday_pre_cues / holiday_pre_cues も)
+  (平日は正時より前の weekday_pre_cues も)
 - 予定通知: 予定の開始時刻に向けた event_notice.cues
 - カウントダウン: 指定時刻に向けた countdown.cues (countdown.py)
 - 鳴らす時刻に (他の) 予定が入っていれば when_busy に従う
@@ -159,17 +159,15 @@ def plan_hour(target: datetime, events: list[Event], cfg: Config) -> Cue:
 
 
 def plan_hour_pre(target: datetime, events: list[Event], cfg: Config) -> list[Cue]:
-    """正時 target より前に鳴らす時報 (平日は weekday_pre_cues、休日は holiday_pre_cues)。
-    その正時の時報を鳴らさないなら鳴らさない。"""
+    """平日の正時 target より前に鳴らす時報 (weekday_pre_cues)。その正時の時報を鳴らさないなら鳴らさない。"""
     hc = cfg.hour_chime
-    if chime_skip_reason(target, events, cfg):
+    if chime_skip_reason(target, events, cfg) or holiday_reason(target, events, cfg):
         return []
-    hol = holiday_reason(target, events, cfg)
     cues = []
-    for spec in hc.holiday_pre_cues if hol else hc.weekday_pre_cues:
+    for spec in hc.weekday_pre_cues:
         at = target - spec.before
         text = spec.text.format(hour=target.hour) if spec.text else None
-        cue = Cue(f"時報{spoken_duration(spec.before)}", at, spec.sound, text, hol or "平日", "hour_chime_pre")
+        cue = Cue(f"時報{spoken_duration(spec.before)}", at, spec.sound, text, "平日", "hour_chime")
         cues.append(apply_busy(cue, hc.when_busy, busy_at(at, events)))
     return cues
 
@@ -194,7 +192,7 @@ def plan_window(start: datetime, end: datetime, events: list[Event], cfg: Config
     """start <= at < end の時報・予定通知 (重なりの解決前、鳴らさないものも含む)。"""
     cues: list[Cue] = []
     hc = cfg.hour_chime
-    pre_lead = max((s.before for s in (*hc.weekday_pre_cues, *hc.holiday_pre_cues)), default=timedelta(0))
+    pre_lead = max((s.before for s in hc.weekday_pre_cues), default=timedelta(0))
     t = start.replace(minute=0, second=0, microsecond=0)
     while t < end + pre_lead:
         if start <= t < end:

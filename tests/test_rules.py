@@ -144,7 +144,7 @@ def test_event_notice_wins_over_pre_cue():
 
 def test_priority_missing_kinds_appended():
     assert parse_config({"priority": ["event_notice"]}).priority == (
-        "event_notice", "countdown", "hour_chime", "hour_chime_pre"
+        "event_notice", "countdown", "hour_chime"
     )
 
 
@@ -251,8 +251,8 @@ def test_hour_chime_priority_configurable():
     assert (at(15), "時報") in labels
     assert (at(15), "予定開始") not in labels
     assert (at(15), "予定5分前") not in labels
-    assert (at(14, 55), "予定5分前") in labels and (at(14, 59, 40), "予定20秒前") in labels
-    assert (at(15, 5), "予定開始") in labels
+    assert (at(14, 55), "時報5分前") in labels and (at(14, 55), "予定5分前") not in labels  # 時報の一部として勝つ
+    assert (at(14, 59, 40), "予定20秒前") in labels and (at(15, 5), "予定開始") in labels
 
 
 # --- カウントダウン (専用カレンダー / コマンド、時報・予定通知と独立) ---
@@ -395,7 +395,7 @@ def test_example_config_parses():
     assert cfg.hour_chime.weekday_hours == tuple(range(8, 21)) and cfg.hour_chime.holiday_hours == (8, 12, 16, 20)
     assert cfg.countdown.dedicated == {"countdown"} and len(cfg.countdown.cues) == 7
     assert [s.before.total_seconds() for s in cfg.event_notice.cues] == [300, 120, 20, 0]
-    assert cfg.priority == ("countdown", "event_notice", "hour_chime", "hour_chime_pre")
+    assert cfg.priority == ("countdown", "event_notice", "hour_chime")
     assert cfg.hour_chime == parse_config({}).hour_chime
     assert len(cfg.calendars) == 4
     # 組み込みの既定値と同じ内容を書いている
