@@ -15,7 +15,7 @@ from .config import CACHE_DIR, SoundOverride
 
 RATE = 24000  # VOICEVOX の既定出力と揃える
 SLOT_CACHE = CACHE_DIR / "slots"
-VERSION = "v3"  # 音を変えたら上げる (キャッシュ無効化)
+VERSION = "v4"  # 音を変えたら上げる (キャッシュ無効化)
 
 
 def _tone(freq: float, dur: float, tau: float | None, amp: float, harmonic: float = 0.0) -> list[float]:
@@ -43,16 +43,8 @@ def _po() -> list[float]:
     return _tone(880, 0.08, 0.03, 0.5, harmonic=0.15)
 
 
-def _pi_hi() -> list[float]:
-    return _tone(1175, 0.15, 0.1, 0.45, harmonic=0.15)
-
-
 def _pin() -> list[float]:
     return _tone(1568, 0.5, 0.12, 0.4, harmonic=0.3)
-
-
-def _poon_lo() -> list[float]:
-    return _tone(784, 2.0, 0.6, 0.5, harmonic=0.15)
 
 
 def _sequence(parts: list[tuple[float, list[float]]]) -> list[float]:
@@ -69,7 +61,7 @@ def _sequence(parts: list[tuple[float, list[float]]]) -> list[float]:
 # 読み上げ開始秒が None なら音が鳴り終わってから読む (余韻の長い音は余韻に重ねて読む)
 SOUNDS = {
     "pipipipoon": (lambda: _sequence([(0, _pip()), (1, _pip()), (2, _pip()), (3, _poon())]), 3.0, 4.2),
-    "pipoon": (lambda: _sequence([(0, _pi_hi()), (0.3, _poon_lo())]), 0.3, 1.3),
+    "pipoon": (lambda: _sequence([(0, _pip()), (1, _poon())]), 1.0, 2.2),  # ピピピポーンの最後のピ・ポーン
     "popopopopo": (lambda: _sequence([(i * 0.1, _po()) for i in range(5)]), 0.0, None),
     "popo": (lambda: _sequence([(i * 0.1, _po()) for i in range(2)]), 0.0, None),
     "poon": (lambda: _poon(), 0.0, None),
