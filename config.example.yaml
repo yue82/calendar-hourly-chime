@@ -5,7 +5,7 @@
 # 予定通知   : 全予定の開始時刻に向けて event_notice.cues (夜間・休日も)
 # カウントダウン: countdown: true のカレンダーの予定とコマンドの指定時刻に向けて countdown.cues
 # 鳴らす時刻に (他の) 予定が入っていれば各 when_busy に従う: sound_only (音だけ) / skip (鳴らさない) / normal
-#   そのときの音量は各 busy_volume 倍 (既定は時報 0.3、ほかは 1.0)
+#   そのときの音量は各 busy_volume 倍 (既定は時報 0.2、ほかは 1.0)
 # conflict_seconds 以内に重なったら priority の順に残す
 #
 # cues の書き方: before (5m / 20s / 0s) 前に sound を鳴らし text を読む。予定名が無いときは text_untitled。
@@ -34,7 +34,7 @@ hour_chime:
   text: "{hour}時です。"
   announce: true  # 続けて N:01〜次の時報ちょうどに始まる予定を読む (announce の文面)
   when_busy: sound_only
-  busy_volume: 0.3  # 予定中の音量の倍率 (0〜1)
+  busy_volume: 0.2  # 予定中の音量の倍率 (0〜1)
   # 平日に正時より前に鳴らすもの (text では {hour} が使える)
   weekday_pre_cues:
     - {before: 5m, sound: popopopopo}

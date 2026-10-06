@@ -70,7 +70,7 @@ class HourChimeConfig:
     text: str = "{hour}時です。"
     announce: bool = True  # 次の時報までに始まる予定を続けて読む
     when_busy: str = "sound_only"
-    busy_volume: float = 0.3  # 予定中の音量の倍率
+    busy_volume: float = 0.2  # 予定中の音量の倍率
     # 平日に正時より前に鳴らすもの (text では {hour} が使える)。予定中の扱いは when_busy
     weekday_pre_cues: tuple[CueSpec, ...] = (_c("5m", "popopopopo"),)
 

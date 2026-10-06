@@ -154,10 +154,10 @@ def test_priority_missing_kinds_appended():
 
 def test_busy_volume():
     busy = [ev("roo", "作業", at(13), at(15))]
-    assert plan_hour(at(14), busy, CFG).volume == 0.3  # 時報は予定中に音量 30%
+    assert plan_hour(at(14), busy, CFG).volume == 0.2  # 時報は予定中に音量 20%
     assert plan_hour(at(14), [], CFG).volume == 1.0
     pre = [c for c in audible_cues(at(13, 54, 30), at(13, 56), busy) if c.label == "時報5分前"]
-    assert pre[0].volume == 0.3  # 5分前も時報の一部
+    assert pre[0].volume == 0.2  # 5分前も時報の一部
     e = ev("roo", "B", at(14, 30), at(15))
     assert plan_event(e.start, [e], busy + [e], CFG)[0].volume == 1.0  # 予定通知は既定 1.0
 
