@@ -48,8 +48,10 @@ def spoken_duration(d: timedelta) -> str:
 
 
 def busy_at(t: datetime, events: list[Event], exclude: Sequence[Event] = ()) -> Event | None:
-    """t に予定 (終日予定を除く) が入っていればそれを返す。"""
-    return next((e for e in events if not e.all_day and e.is_ongoing(t) and e not in exclude), None)
+    """t に予定 (終日予定・「予定なし」の予定を除く) が入っていればそれを返す。"""
+    return next(
+        (e for e in events if not e.all_day and not e.transparent and e.is_ongoing(t) and e not in exclude), None
+    )
 
 
 def apply_busy(cue: Cue, when_busy: str, busy: Event | None, busy_volume: float = 1.0) -> Cue:

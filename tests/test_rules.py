@@ -546,3 +546,15 @@ def test_dnd_window_margins_and_back_to_back():
     assert not busy_at(at(13, 30), evs)  # カウントダウン専用カレンダーは対象外
     free = Event("roo", "断水", at(16), at(17), False, "", transparent=True)
     assert not busy_at(at(16, 30), dnd_events([free], cfg))  # 「予定なし」は対象外
+
+
+def test_transparent_event_not_busy_but_announced():
+    free = Event("roo", "断水", at(13, 30), at(15), False, "", transparent=True)
+    assert hour(at(14), [free]) == ("pipipipoon", "14時です。")  # 予定中扱いしない (音量も通常)
+    assert plan_hour(at(14), [free], CFG).volume == 1.0
+    # 予定なしの予定も案内・予定通知では読む
+    assert hour(at(13), [free]) == ("pipipipoon", "13時です。13時30分から、断水です。")
+    assert plan_event(free.start, [free], [free], CFG)[0].text == "13時30分から、断水です。"
+    # 予定なしの予定の最中に始まる予定の通知は、音だけにならない
+    e = ev("roo", "打合せ", at(14, 30), at(15))
+    assert plan_event(e.start, [e], [free, e], CFG)[0].text == "14時30分から、打合せです。"
