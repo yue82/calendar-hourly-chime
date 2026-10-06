@@ -128,11 +128,12 @@ def dnd_sync(at: datetime, events: list[ical.Event], cfg: Config) -> None:
 
 
 def dnd_events(events: list[ical.Event], cfg: Config) -> list[ical.Event]:
-    """応答不可にする時間 = 予定を前後に before / after だけ広げたもの (続く予定は重なって途切れない)。"""
+    """応答不可にする時間 = 予定を前後に before / after だけ広げたもの (続く予定は重なって途切れない)。
+    「予定なし」(transparent) の予定は対象外。"""
     return [
         replace(e, start=e.start - cfg.dnd.before, end=e.end + cfg.dnd.after)
         for e in chime_events(events, cfg)
-        if not e.all_day
+        if not e.all_day and not e.transparent
     ]
 
 

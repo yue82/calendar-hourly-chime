@@ -27,6 +27,7 @@ class Event:
     end: datetime
     all_day: bool
     description: str = ""
+    transparent: bool = False  # Google カレンダーの「予定なし」(TRANSP:TRANSPARENT)
 
     def is_ongoing(self, t: datetime) -> bool:
         return self.start <= t < self.end
@@ -92,6 +93,7 @@ def parse_events(
                 end=e,
                 all_day=all_day,
                 description=str(comp.get("DESCRIPTION", "")).strip(),
+                transparent=str(comp.get("TRANSP", "")).upper() == "TRANSPARENT",
             )
         )
     return events

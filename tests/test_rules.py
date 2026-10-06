@@ -454,6 +454,7 @@ SUMMARY:週次MTG
 END:VEVENT
 BEGIN:VEVENT
 UID:2
+TRANSP:TRANSPARENT
 DTSTART;VALUE=DATE:20260928
 DTEND;VALUE=DATE:20260929
 SUMMARY:有給
@@ -477,6 +478,7 @@ def test_parse_ics_recurring_allday_cancelled():
     assert (mtg.start, mtg.end, mtg.all_day) == (at(14), at(15), False)
     off = titles["有給"]
     assert off.all_day and off.start == at(0) and off.end == at(0, day=29)
+    assert off.transparent and not mtg.transparent
 
 
 def test_windows_script_one_item_per_add():
@@ -542,3 +544,5 @@ def test_dnd_window_margins_and_back_to_back():
     assert busy_at(at(11), evs) and busy_at(at(11, 0, 30), evs)  # 連続する予定の間も途切れない
     assert busy_at(at(12, 0, 29), evs) and not busy_at(at(12, 0, 30), evs)  # 30 秒後にオフ
     assert not busy_at(at(13, 30), evs)  # カウントダウン専用カレンダーは対象外
+    free = Event("roo", "断水", at(16), at(17), False, "", transparent=True)
+    assert not busy_at(at(16, 30), dnd_events([free], cfg))  # 「予定なし」は対象外
