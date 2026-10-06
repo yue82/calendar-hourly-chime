@@ -27,6 +27,7 @@ class Cue:
     text: str | None  # 読み上げ (None なら読まない)
     reason: str
     kind: str = ""  # hour_chime / event_notice / countdown
+    volume: float = 1.0  # 音量の倍率
 
     @property
     def silent(self) -> bool:
@@ -51,14 +52,15 @@ def busy_at(t: datetime, events: list[Event], exclude: Sequence[Event] = ()) -> 
     return next((e for e in events if not e.all_day and e.is_ongoing(t) and e not in exclude), None)
 
 
-def apply_busy(cue: Cue, when_busy: str, busy: Event | None) -> Cue:
-    """予定中なら when_busy (sound_only / skip / normal) に従って変える。"""
-    if busy is None or when_busy == "normal":
+def apply_busy(cue: Cue, when_busy: str, busy: Event | None, busy_volume: float = 1.0) -> Cue:
+    """予定中なら when_busy (sound_only / skip / normal) に従って変え、音量を busy_volume 倍にする。"""
+    if busy is None:
         return cue
     reason = f"{cue.reason} / 予定中 ({busy.calendar}: {busy.title})"
     if when_busy == "skip":
         return replace(cue, sound=None, text=None, reason=reason)
-    return replace(cue, text=None, reason=reason)
+    text = cue.text if when_busy == "normal" else None
+    return replace(cue, text=text, reason=reason, volume=busy_volume)
 
 
 def holiday_reason(t: datetime, events: list[Event], cfg: Config) -> str | None:
@@ -155,7 +157,7 @@ def plan_hour(target: datetime, events: list[Event], cfg: Config) -> Cue:
     if hc.announce:
         text += announce_text(target, next_chime(target, events, cfg), events, cfg)
     cue = Cue("時報", target, hc.sound, text, holiday_reason(target, events, cfg) or "平日", "hour_chime")
-    return apply_busy(cue, hc.when_busy, busy_at(target, events))
+    return apply_busy(cue, hc.when_busy, busy_at(target, events), hc.busy_volume)
 
 
 def plan_hour_pre(target: datetime, events: list[Event], cfg: Config) -> list[Cue]:
@@ -168,7 +170,7 @@ def plan_hour_pre(target: datetime, events: list[Event], cfg: Config) -> list[Cu
         at = target - spec.before
         text = spec.text.format(hour=target.hour) if spec.text else None
         cue = Cue(f"時報{spoken_duration(spec.before)}", at, spec.sound, text, "平日", "hour_chime")
-        cues.append(apply_busy(cue, hc.when_busy, busy_at(at, events)))
+        cues.append(apply_busy(cue, hc.when_busy, busy_at(at, events), hc.busy_volume))
     return cues
 
 
@@ -184,7 +186,7 @@ def plan_event(start: datetime, group: list[Event], events: list[Event], cfg: Co
         at = start - spec.before
         label = "予定開始" if not spec.before else f"予定{spoken_duration(spec.before)}"
         cue = Cue(label, at, spec.sound, format_spec(spec, titles, start=spoken_time(start)), "予定通知", "event_notice")
-        cues.append(apply_busy(cue, en.when_busy, busy_at(at, events, exclude=group)))
+        cues.append(apply_busy(cue, en.when_busy, busy_at(at, events, exclude=group), en.busy_volume))
     return cues
 
 

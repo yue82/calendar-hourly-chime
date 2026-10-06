@@ -113,13 +113,13 @@ def _resolve(sound: str, overrides: dict[str, SoundOverride]) -> tuple[list[floa
 
 
 def compose(
-    sound: str | None, voice: Path | None, overrides: dict[str, SoundOverride] | None = None
+    sound: str | None, voice: Path | None, overrides: dict[str, SoundOverride] | None = None, volume: float = 1.0
 ) -> tuple[Path, float]:
-    """音 → 読み上げ の wav を作り、(パス, アンカー秒) を返す。"""
+    """音 → 読み上げ の wav を作り、(パス, アンカー秒) を返す。volume は全体の音量の倍率。"""
     if sound is None and voice is None:
         raise ValueError("sound も voice も無い")
     samples, anchor, voice_at, ident = _resolve(sound, overrides or {}) if sound else ([], 0.0, None, "")
-    key = hashlib.sha256(f"{VERSION}|{ident}|{voice.name if voice else ''}".encode()).hexdigest()[:16]
+    key = hashlib.sha256(f"{VERSION}|{ident}|{voice.name if voice else ''}|{volume}".encode()).hexdigest()[:16]
     out = SLOT_CACHE / f"{key}.wav"
     if out.exists():
         out.touch()
@@ -133,6 +133,8 @@ def compose(
         buf = samples
     else:
         buf = _read_wav(voice)
+    if volume != 1.0:
+        buf = [v * volume for v in buf]
     _write_wav(out, buf)
     return out, anchor
 

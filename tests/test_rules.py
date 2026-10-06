@@ -44,6 +44,10 @@ def hour(target: datetime, events: list[Event]) -> tuple[str | None, str | None]
     return c.sound, c.text
 
 
+def audible_cues(start: datetime, end: datetime, events: list[Event], cfg=CFG):
+    return [c for c in collect(start, end, events, cfg, None) if not c.silent]
+
+
 def audible(start: datetime, end: datetime, events: list[Event], cfg=CFG) -> list[tuple]:
     return [(c.at, c.label, c.sound, c.text) for c in collect(start, end, events, cfg, None) if not c.silent]
 
@@ -146,6 +150,33 @@ def test_priority_missing_kinds_appended():
     assert parse_config({"priority": ["event_notice"]}).priority == (
         "event_notice", "countdown", "hour_chime"
     )
+
+
+def test_busy_volume():
+    busy = [ev("roo", "作業", at(13), at(15))]
+    assert plan_hour(at(14), busy, CFG).volume == 0.3  # 時報は予定中に音量 30%
+    assert plan_hour(at(14), [], CFG).volume == 1.0
+    pre = [c for c in audible_cues(at(13, 54, 30), at(13, 56), busy) if c.label == "時報5分前"]
+    assert pre[0].volume == 0.3  # 5分前も時報の一部
+    e = ev("roo", "B", at(14, 30), at(15))
+    assert plan_event(e.start, [e], busy + [e], CFG)[0].volume == 1.0  # 予定通知は既定 1.0
+
+
+def test_compose_volume(tmp_path, monkeypatch):
+    import wave
+    from array import array
+
+    from calendar_hourly_chime import sounds
+
+    monkeypatch.setattr(sounds, "SLOT_CACHE", tmp_path)
+
+    def peak(p):
+        with wave.open(str(p)) as w:
+            return max(abs(x) for x in array("h", w.readframes(w.getnframes())))
+
+    full, _ = sounds.compose("poon", None)
+    low, _ = sounds.compose("poon", None, volume=0.3)
+    assert full != low and abs(peak(low) / peak(full) - 0.3) < 0.01
 
 
 # --- 休日 (曜日・祝日・休み予定を同じ扱い) ---

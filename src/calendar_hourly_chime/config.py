@@ -70,6 +70,7 @@ class HourChimeConfig:
     text: str = "{hour}時です。"
     announce: bool = True  # 次の時報までに始まる予定を続けて読む
     when_busy: str = "sound_only"
+    busy_volume: float = 0.3  # 予定中の音量の倍率
     # 平日に正時より前に鳴らすもの (text では {hour} が使える)。予定中の扱いは when_busy
     weekday_pre_cues: tuple[CueSpec, ...] = (_c("5m", "popopopopo"),)
 
@@ -105,6 +106,7 @@ class EventNoticeConfig:
         _c("0s", "pipoon"),
     )
     when_busy: str = "sound_only"
+    busy_volume: float = 1.0  # 予定中の音量の倍率
 
 
 _CD_WITH_TIME = ("{time}の{title}まで、あと{n}分です。", "{time}まで、あと{n}分です。")
@@ -123,6 +125,7 @@ class CountdownConfig:
         _c("0s", "pipoon", "{time}、{title}の時間です。", "{time}です。"),
     )
     when_busy: str = "sound_only"
+    busy_volume: float = 1.0  # 予定中の音量の倍率
     dedicated: frozenset[str] = frozenset()  # countdown: true のカレンダー
 
 
@@ -175,6 +178,13 @@ def _when_busy(v: Any, where: str) -> str:
     return v
 
 
+def _volume(v: Any, where: str) -> float:
+    v = float(v)
+    if not 0 <= v <= 1:
+        raise ValueError(f"{where}.busy_volume は 0〜1: {v}")
+    return v
+
+
 def _hours(v: Any, where: str) -> tuple[int, ...]:
     hours = tuple(sorted(int(h) for h in v))
     if any(not 0 <= h <= 23 for h in hours):
@@ -224,6 +234,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         text=hc.get("text", d.text),
         announce=bool(hc.get("announce", d.announce)),
         when_busy=_when_busy(hc.get("when_busy"), "hour_chime"),
+        busy_volume=_volume(hc.get("busy_volume", d.busy_volume), "hour_chime"),
         weekday_pre_cues=_cues(hc.get("weekday_pre_cues"), d.weekday_pre_cues),
     )
 
@@ -248,12 +259,14 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
     event_notice = EventNoticeConfig(
         cues=_cues(en.get("cues"), EventNoticeConfig.cues),
         when_busy=_when_busy(en.get("when_busy"), "event_notice"),
+        busy_volume=_volume(en.get("busy_volume", 1.0), "event_notice"),
     )
 
     cd = raw.get("countdown") or {}
     countdown = CountdownConfig(
         cues=_cues(cd.get("cues"), CountdownConfig.cues),
         when_busy=_when_busy(cd.get("when_busy"), "countdown"),
+        busy_volume=_volume(cd.get("busy_volume", 1.0), "countdown"),
         dedicated=frozenset(c.name for c in calendars if c.countdown),
     )
 

@@ -46,7 +46,8 @@ def cues_of(cd: Countdown, cfg: Config, events: list[Event] = ()) -> list[Cue]:
         at = cd.at - spec.before
         label = "CD時刻" if not spec.before else f"CD{spoken_duration(spec.before)}"
         text = format_spec(spec, titles, time=spoken_time(cd.at), n=minutes)
-        out.append(apply_busy(Cue(label, at, spec.sound, text, reason, "countdown"), cc.when_busy, busy_at(at, events)))
+        cue = Cue(label, at, spec.sound, text, reason, "countdown")
+        out.append(apply_busy(cue, cc.when_busy, busy_at(at, events), cc.busy_volume))
     return out
 
 

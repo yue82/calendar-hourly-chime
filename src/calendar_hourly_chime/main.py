@@ -101,11 +101,13 @@ def get_events(cfg: Config, around: datetime, hours_after: float, refresh: bool)
 def render(cue: rules.Cue, cfg: Config) -> tuple[Path, float]:
     """(wav, アンカー秒) を返す。"""
     voice = tts.synthesize(cue.text, cfg.tts) if cue.text else None
-    return sounds.compose(cue.sound, voice, cfg.sounds)
+    return sounds.compose(cue.sound, voice, cfg.sounds, cue.volume)
 
 
 def describe(cue: rules.Cue) -> str:
     what = " + ".join(x for x in (cue.sound, cue.text and f"「{cue.text}」") if x) or "(鳴らさない)"
+    if not cue.silent and cue.volume != 1.0:
+        what += f" (音量{cue.volume:.0%})"
     return f"{cue.at:%m/%d %H:%M:%S} {cue.label:<7} {what}  [{cue.reason}]"
 
 
