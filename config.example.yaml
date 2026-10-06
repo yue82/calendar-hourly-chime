@@ -85,6 +85,15 @@ sounds:
   # pipoon: /mnt/c/Users/me/Music/pipoon.wav
   # pipipipoon: {path: /mnt/c/Users/me/Music/jihou.wav, anchor: 3.0}
 
+# 予定中 (前後に before / after だけ広げた時間) は Windows の応答不可をオンにする。
+# このプログラムがオンにしたものだけ予定後にオフに戻す。予定中に手動でオフにしたら、その予定の間はオンにしない。
+# 切り替えのたびに通知センターが一瞬開く (公開 API が無いため UI Automation で操作する)
+do_not_disturb:
+  enabled: false
+  first_run_off: true  # その日最初の確認で、予定中でなければ (手動でオンにしていても) オフにする
+  before: 30s
+  after: 30s
+
 tts:
   engine: sapi  # sapi | voicevox (voicevox 失敗時は sapi にフォールバック)
   sapi:

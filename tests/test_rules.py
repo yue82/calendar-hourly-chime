@@ -488,3 +488,57 @@ def test_windows_script_one_item_per_add():
     assert "$items = @(" not in one
     two = windows_script([Scheduled(Path("a"), 1, "x"), Scheduled(Path("b"), 2, "y")], ["a", "b"])
     assert two.count("[void]$items.Add(") == 2
+
+
+# --- 応答不可 ---
+
+
+def test_dnd_decide():
+    from calendar_hourly_chime.dnd import DndState, decide
+
+    mtg = ev("roo", "会議", at(14), at(15))
+    day = at(9).date().isoformat()
+    st = DndState(last_day=day)
+
+    # 予定開始でオフならオンにし、自分がオンにしたと記録
+    act, st1, _ = decide(at(14, 0, 1), mtg, False, st, True)
+    assert act is True and st1.managed
+    # 予定中でオンのままなら何もしない
+    assert decide(at(14, 30), mtg, True, st1, True)[0] is None
+    # 予定終了で、自分がオンにしたものはオフに戻す
+    act, st2, _ = decide(at(15, 0, 1), None, True, st1, True)
+    assert act is False and not st2.managed
+    # 手動でオンにしたもの (managed でない) は予定が無くても触らない
+    assert decide(at(16), None, True, st, True)[0] is None
+    # 予定中に手動でオフにされたら、その予定の間はオンにしない
+    act, st3, _ = decide(at(14, 20), mtg, False, st1, True)
+    assert act is None and st3.override_until == mtg.end.isoformat()
+    assert decide(at(14, 40), mtg, False, st3, True)[0] is None
+    nxt = ev("roo", "次", at(15, 30), at(16))
+    assert decide(at(15, 30, 1), nxt, False, st3, True)[0] is True  # 次の予定ではまたオンにする
+
+
+def test_dnd_first_run_of_day():
+    from calendar_hourly_chime.dnd import DndState, decide
+
+    yesterday = DndState(managed=False, last_day=at(9, day=27).date().isoformat())
+    # その日最初の確認で予定が無ければ、手動オンでもオフにする
+    act, st, _ = decide(at(9), None, True, yesterday, True)
+    assert act is False and st.last_day == at(9).date().isoformat()
+    assert decide(at(9, 5), None, True, st, True)[0] is None  # 2 回目以降は手動オンに触らない
+    # 予定中なら通常どおり (オンにする)
+    assert decide(at(9), ev("roo", "朝会", at(9), at(10)), False, yesterday, True)[0] is True
+    # first_run_off が無効なら手動オンに触らない
+    assert decide(at(9), None, True, yesterday, False)[0] is None
+
+
+def test_dnd_window_margins_and_back_to_back():
+    from calendar_hourly_chime.main import dnd_events
+    from calendar_hourly_chime.rules import busy_at
+
+    cfg = parse_config({**RAW, "do_not_disturb": {"enabled": True}})
+    evs = dnd_events([ev("roo", "A", at(10), at(11)), ev("roo", "B", at(11), at(12)), ev("cd", "CD", at(13), at(14))], cfg)
+    assert busy_at(at(9, 59, 30), evs) and not busy_at(at(9, 59, 29), evs)  # 30 秒前からオン
+    assert busy_at(at(11), evs) and busy_at(at(11, 0, 30), evs)  # 連続する予定の間も途切れない
+    assert busy_at(at(12, 0, 29), evs) and not busy_at(at(12, 0, 30), evs)  # 30 秒後にオフ
+    assert not busy_at(at(13, 30), evs)  # カウントダウン専用カレンダーは対象外

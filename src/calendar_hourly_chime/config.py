@@ -145,6 +145,16 @@ class SoundOverride:
 
 
 @dataclass(frozen=True)
+class DndConfig:
+    """予定中に Windows の応答不可をオンにする。"""
+
+    enabled: bool = False
+    first_run_off: bool = True  # その日最初の確認で、予定中でなければオフにする
+    before: timedelta = timedelta(seconds=30)  # 予定の開始のこれだけ前にオン
+    after: timedelta = timedelta(seconds=30)  # 予定の終了のこれだけ後にオフ
+
+
+@dataclass(frozen=True)
 class TTSConfig:
     engine: str = "sapi"  # sapi | voicevox
     sapi_voice: str = "Microsoft Haruka Desktop"
@@ -167,6 +177,7 @@ class Config:
     priority: tuple[str, ...] = KINDS
     conflict: timedelta = timedelta(seconds=10)
     sounds: dict[str, SoundOverride] = field(default_factory=dict)
+    dnd: DndConfig = field(default_factory=DndConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     player: str = "windows"  # windows | paplay
 
@@ -289,6 +300,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         else:
             sounds[name] = SoundOverride(Path(v).expanduser())
 
+    dd = raw.get("do_not_disturb") or {}
     t = raw.get("tts") or {}
     sapi = t.get("sapi") or {}
     vv = t.get("voicevox") or {}
@@ -313,6 +325,12 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         priority=priority,
         conflict=timedelta(seconds=float(raw.get("conflict_seconds", 10))),
         sounds=sounds,
+        dnd=DndConfig(
+            enabled=bool(dd.get("enabled", False)),
+            first_run_off=bool(dd.get("first_run_off", True)),
+            before=parse_duration(dd.get("before", "30s")),
+            after=parse_duration(dd.get("after", "30s")),
+        ),
         tts=tts,
         player=raw.get("player", "windows"),
     )

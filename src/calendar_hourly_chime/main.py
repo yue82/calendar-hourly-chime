@@ -7,13 +7,14 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from . import countdown, ical, player, rules, sounds, tts
+from . import countdown, dnd, ical, player, rules, sounds, tts
 from .config import APP, DEFAULT_CONFIG_PATH, STATE_DIR, Config, HolidayConfig, load_config
 
 log = logging.getLogger(__package__)
@@ -38,6 +39,8 @@ def setup_logging(verbose: bool) -> None:
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     root.addHandler(fh)
     root.addHandler(sh)
+    # 通信ライブラリの DEBUG ログは URL (非公開 URL・キー入り) をそのまま出すので常に抑える
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
 def next_target(now: datetime) -> datetime:
@@ -111,6 +114,42 @@ def describe(cue: rules.Cue) -> str:
     return f"{cue.at:%m/%d %H:%M:%S} {cue.label:<7} {what}  [{cue.reason}]"
 
 
+def dnd_sync(at: datetime, events: list[ical.Event], cfg: Config) -> None:
+    """at の時点の予定に合わせて応答不可を切り替える。"""
+    current = dnd.is_on()
+    if current is None:
+        return
+    busy = rules.busy_at(at, events)
+    action, st, reason = dnd.decide(at, busy, current, dnd.load(), cfg.dnd.first_run_off)
+    if action is not None and not dnd.set_on(action) and action:
+        st.managed = False  # オンにできなかった
+    dnd.save(st)
+    log.info("応答不可: %s → %s (%s)", "オン" if current else "オフ", "そのまま" if action is None else ("オン" if action else "オフ"), reason)
+
+
+def dnd_events(events: list[ical.Event], cfg: Config) -> list[ical.Event]:
+    """応答不可にする時間 = 予定を前後に before / after だけ広げたもの (続く予定は重なって途切れない)。"""
+    return [
+        replace(e, start=e.start - cfg.dnd.before, end=e.end + cfg.dnd.after)
+        for e in chime_events(events, cfg)
+        if not e.all_day
+    ]
+
+
+def dnd_worker(start: datetime, end: datetime, events: list[ical.Event], cfg: Config) -> None:
+    """[start, end) の間、start と「応答不可にする時間」の始まり・終わりに応答不可を合わせる。"""
+    events = dnd_events(events, cfg)
+    times = sorted({start} | {t for e in events for t in (e.start, e.end) if start < t < end})
+    for t in times:
+        wait = t.timestamp() - time.time()
+        if wait > 0:
+            time.sleep(wait + (1 if t != start else 0))  # 開始・終了の直後に判定する
+        try:
+            dnd_sync(datetime.now(cfg.timezone), events, cfg)
+        except Exception:
+            log.exception("応答不可の切り替えに失敗")
+
+
 def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
     now = datetime.fromisoformat(args.at).replace(tzinfo=cfg.timezone) if args.at else datetime.now(cfg.timezone)
     start, end = window_of(now)
@@ -123,9 +162,23 @@ def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
             print(describe(c))
     if args.dry_run:
         return 0
+    worker = None
+    if cfg.dnd.enabled:
+        worker = threading.Thread(target=dnd_worker, args=(start, end, events, cfg), daemon=True)
+        worker.start()
     play_cues(cues, cfg)
     tts.prune_cache(sounds.SLOT_CACHE)
+    if worker:
+        worker.join(timeout=max(0, end.timestamp() - time.time()) + 60)
     return 0
+
+
+def cmd_dnd(args: argparse.Namespace, cfg: Config) -> int:
+    if args.action == "status":
+        on = dnd.is_on()
+        print(f"応答不可: {'不明' if on is None else 'オン' if on else 'オフ'}  記録: {dnd.load()}")
+        return 0
+    return 0 if dnd.set_on(args.action == "on") else 1
 
 
 def _offsets_text(offsets: tuple[int, ...] | None) -> str:
@@ -303,6 +356,10 @@ def main(argv: list[str] | None = None) -> int:
     kp.add_argument("id")
     kp.add_argument("until")
     kp.set_defaults(func=cmd_countdown_play)
+
+    n = sub.add_parser("dnd", help="Windows の応答不可を確認・切り替える (動作確認用)")
+    n.add_argument("action", choices=["status", "on", "off"])
+    n.set_defaults(func=cmd_dnd)
 
     y = sub.add_parser("say", help="任意のテキストを喋る (音声確認用)")
     y.add_argument("text")
