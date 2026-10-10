@@ -79,6 +79,9 @@ announce:
   item: "{start}から、{title}です。"
   item_untitled: "{start}から、予定があります。"
   max_items: 3
+  # その日最後の時報 (次の時報が翌日) では、翌日のこの時刻までに始まる予定も読む (翌日分の頭に next_day_prefix)
+  next_day_until: "12:00"
+  next_day_prefix: "明日は、"
 
 # 音の差し替え (省略時は組み込みの音)。anchor: この秒の位置を指定時刻ちょうどに合わせる
 sounds:

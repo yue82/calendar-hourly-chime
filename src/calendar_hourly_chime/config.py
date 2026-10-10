@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -136,6 +136,9 @@ class AnnounceConfig:
     item: str = "{start}から、{title}です。"
     item_untitled: str = "{start}から、予定があります。"
     max_items: int = 3
+    # その日最後の時報 (次の時報が翌日) では、翌日のこの時刻までに始まる予定も読む
+    next_day_until: time = time(12, 0)
+    next_day_prefix: str = "明日は、"
 
 
 @dataclass(frozen=True)
@@ -180,6 +183,13 @@ class Config:
     dnd: DndConfig = field(default_factory=DndConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     player: str = "windows"  # windows | paplay
+
+
+def _time(v: Any) -> time:
+    # YAML は 12:00 をクォート無しだと 60 進数として int にしてしまう
+    if isinstance(v, int):
+        return time(v // 60, v % 60)
+    return time.fromisoformat(str(v))
 
 
 def _when_busy(v: Any, where: str) -> str:
@@ -286,6 +296,8 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         item=an.get("item", AnnounceConfig.item),
         item_untitled=an.get("item_untitled", AnnounceConfig.item_untitled),
         max_items=an.get("max_items", AnnounceConfig.max_items),
+        next_day_until=_time(an.get("next_day_until", "12:00")),
+        next_day_prefix=an.get("next_day_prefix", AnnounceConfig.next_day_prefix),
     )
 
     priority = tuple(raw.get("priority") or ())

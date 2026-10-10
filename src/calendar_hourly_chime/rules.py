@@ -95,7 +95,7 @@ def format_spec(spec: CueSpec, titles: list[str], **kw: object) -> str | None:
 # --- 時報 ---
 
 
-def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Config) -> str:
+def announce_lines(start: datetime, end: datetime, events: list[Event], cfg: Config) -> list[str]:
     """start < 開始 <= end の予定の案内文 (時報用。start の正時ちょうどに始まる予定はその最中なので除き、
     次の時報 end ちょうどに始まる予定は含める)。
     予定名が無い/読めない予定は、その時間内に収まる予定名の分かる予定があればそちらを読み
@@ -129,7 +129,21 @@ def announce_text(start: datetime, end: datetime, events: list[Event], cfg: Conf
                 say(e.start, readable_title(e, cfg))
         else:
             lines.append(an.item_untitled.format(start=spoken_time(t)))
-    return "".join(lines[: an.max_items])
+    return lines
+
+
+def announce_text(target: datetime, next_at: datetime, events: list[Event], cfg: Config) -> str:
+    """時報 target で読む案内 (次の時報 next_at まで)。次の時報が翌日なら、翌日の next_day_until までも読む。"""
+    an = cfg.announce
+    if next_at.date() == target.date():
+        return "".join(announce_lines(target, next_at, events, cfg)[: an.max_items])
+    midnight = datetime.combine(target.date() + timedelta(days=1), datetime.min.time(), target.tzinfo)
+    until = max(next_at, midnight.replace(hour=an.next_day_until.hour, minute=an.next_day_until.minute))
+    tonight = announce_lines(target, midnight - timedelta(microseconds=1), events, cfg)
+    tomorrow = announce_lines(midnight - timedelta(microseconds=1), until, events, cfg)
+    if tomorrow:
+        tomorrow[0] = an.next_day_prefix + tomorrow[0]
+    return "".join((tonight + tomorrow)[: an.max_items])
 
 
 def chime_skip_reason(target: datetime, events: list[Event], cfg: Config) -> str | None:
