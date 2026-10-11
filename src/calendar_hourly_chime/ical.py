@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time as _time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -99,6 +99,14 @@ def parse_events(
     return events
 
 
+def as_all_day_if_whole_days(e: Event) -> Event:
+    """0:00 に始まり 0:00 に終わる枠を終日予定にする。
+    空き時間情報 (busy_only) では終日予定も時間指定の枠として返ってくるため。"""
+    if not e.all_day and e.end > e.start and e.start.time() == e.end.time() == datetime.min.time():
+        return replace(e, all_day=True)
+    return e
+
+
 def load_events(
     sources: tuple[CalendarSource, ...],
     start: datetime,
@@ -112,7 +120,10 @@ def load_events(
         if ics is None:
             continue
         try:
-            events += parse_events(src.name, ics, start, end, tz)
+            parsed = parse_events(src.name, ics, start, end, tz)
+            if src.busy_only:
+                parsed = [as_all_day_if_whole_days(e) for e in parsed]
+            events += parsed
         except Exception:
             log.exception("カレンダー %s の解析に失敗", src.name)
     events.sort(key=lambda e: (e.start, e.calendar, e.title))

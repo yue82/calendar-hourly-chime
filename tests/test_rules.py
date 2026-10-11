@@ -565,3 +565,15 @@ def test_transparent_event_not_busy_but_announced():
     # 予定なしの予定の最中に始まる予定の通知は、音だけにならない
     e = ev("roo", "打合せ", at(14, 30), at(15))
     assert plan_event(e.start, [e], [free, e], CFG)[0].text == "14時30分から、打合せです。"
+
+
+def test_busy_only_whole_day_block_is_all_day():
+    from calendar_hourly_chime.ical import as_all_day_if_whole_days
+
+    block = ev("tai", "予定あり", at(0, day=12), at(0, day=13))  # 空き時間情報の終日予定
+    assert as_all_day_if_whole_days(block).all_day
+    assert not as_all_day_if_whole_days(ev("tai", "予定あり", at(0, day=12), at(9, day=12))).all_day
+    assert not as_all_day_if_whole_days(ev("tai", "予定あり", at(8, day=12), at(0, day=13))).all_day
+    # 終日予定になれば予定通知は鳴らない
+    cues = [c for c in collect(at(23, 54, 30, day=11), at(0, 5, day=12), [as_all_day_if_whole_days(block)], CFG, None) if not c.silent]
+    assert not [c for c in cues if c.label.startswith("予定")]

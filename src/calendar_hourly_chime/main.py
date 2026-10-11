@@ -142,9 +142,10 @@ def dnd_worker(start: datetime, end: datetime, events: list[ical.Event], cfg: Co
     events = dnd_events(events, cfg)
     times = sorted({start} | {t for e in events for t in (e.start, e.end) if start < t < end})
     for t in times:
-        wait = t.timestamp() - time.time()
+        # 境目ちょうどだと sleep の誤差で手前に起きることがあるので、1 秒過ぎてから判定する
+        wait = t.timestamp() + 1 - time.time()
         if wait > 0:
-            time.sleep(wait + (1 if t != start else 0))  # 開始・終了の直後に判定する
+            time.sleep(wait)
         try:
             dnd_sync(datetime.now(cfg.timezone), events, cfg)
         except Exception:
