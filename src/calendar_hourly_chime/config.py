@@ -181,6 +181,7 @@ class Config:
     conflict: timedelta = timedelta(seconds=10)
     sounds: dict[str, SoundOverride] = field(default_factory=dict)
     dnd: DndConfig = field(default_factory=DndConfig)
+    volume: float = 1.0  # 全体の音量の倍率 (busy_volume と掛け合わせる)
     tts: TTSConfig = field(default_factory=TTSConfig)
     player: str = "windows"  # windows | paplay
 
@@ -202,7 +203,7 @@ def _when_busy(v: Any, where: str) -> str:
 def _volume(v: Any, where: str) -> float:
     v = float(v)
     if not 0 <= v <= 1:
-        raise ValueError(f"{where}.busy_volume は 0〜1: {v}")
+        raise ValueError(f"{where} の音量は 0〜1: {v}")
     return v
 
 
@@ -343,6 +344,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
             before=parse_duration(dd.get("before", "30s")),
             after=parse_duration(dd.get("after", "30s")),
         ),
+        volume=_volume(raw.get("volume", 1.0), "全体"),
         tts=tts,
         player=raw.get("player", "windows"),
     )

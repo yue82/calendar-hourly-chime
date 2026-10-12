@@ -577,3 +577,12 @@ def test_busy_only_whole_day_block_is_all_day():
     # 終日予定になれば予定通知は鳴らない
     cues = [c for c in collect(at(23, 54, 30, day=11), at(0, 5, day=12), [as_all_day_if_whole_days(block)], CFG, None) if not c.silent]
     assert not [c for c in cues if c.label.startswith("予定")]
+
+
+def test_master_volume():
+    assert parse_config({}).volume == 1.0
+    assert parse_config({"volume": 0.5}).volume == 0.5
+    import pytest
+
+    with pytest.raises(ValueError):
+        parse_config({"volume": 2})

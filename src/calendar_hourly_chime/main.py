@@ -104,7 +104,7 @@ def get_events(cfg: Config, around: datetime, hours_after: float, refresh: bool)
 def render(cue: rules.Cue, cfg: Config) -> tuple[Path, float]:
     """(wav, アンカー秒) を返す。"""
     voice = tts.synthesize(cue.text, cfg.tts) if cue.text else None
-    return sounds.compose(cue.sound, voice, cfg.sounds, cue.volume)
+    return sounds.compose(cue.sound, voice, cfg.sounds, cue.volume * cfg.volume)
 
 
 def describe(cue: rules.Cue) -> str:

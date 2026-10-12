@@ -109,4 +109,6 @@ tts:
     speaker: 3  # ずんだもん (ノーマル)
     speed: 1.0
 
+volume: 0.5  # 全体の音量の倍率 (0〜1)。予定中はさらに各 busy_volume 倍
+
 player: windows  # windows (PowerShell で再生) | paplay (WSLg)
