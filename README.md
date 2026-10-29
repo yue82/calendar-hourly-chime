@@ -57,6 +57,7 @@ Google カレンダー (iCal) と連動する時報・予定通知・カウン�
 - 「予定中」= その時刻に終日以外の予定が入っている (カウントダウン専用カレンダーと、Google カレンダーで「予定なし」にした予定を除く)。
   「予定なし」の予定も、時報の案内・予定通知では読み上げる
 - 予定中の時報 (5分前を含む) は音だけ・音量 20% (`hour_chime.busy_volume`)。予定通知・カウントダウンにも `busy_volume` がある (既定 1.0)
+- 正時ちょうどに予定が終わった時報 (例: 15:00〜16:00 の会議のあとの 16 時) は読み上げるが音量 50% (`hour_chime.just_ended_volume`)
 - `conflict_seconds` (10 秒) 以内に重なったら `priority` の順に残す (既定: カウントダウン > 予定通知 > 時報)
 - 音は組み込み (pipipipoon pipoon popopopopo popo poon pin pinpin pinpinpin) か、`sounds` で wav に差し替え
 

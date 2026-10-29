@@ -35,6 +35,7 @@ hour_chime:
   announce: true  # 続けて N:01〜次の時報ちょうどに始まる予定を読む (announce の文面)
   when_busy: sound_only
   busy_volume: 0.2  # 予定中の音量の倍率 (0〜1)
+  just_ended_volume: 0.5  # 正時ちょうどに予定が終わったときの音量の倍率 (読み上げはする)
   # 平日に正時より前に鳴らすもの (text では {hour} が使える)
   weekday_pre_cues:
     - {before: 5m, sound: popopopopo}

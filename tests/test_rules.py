@@ -586,3 +586,14 @@ def test_master_volume():
 
     with pytest.raises(ValueError):
         parse_config({"volume": 2})
+
+
+def test_just_ended_volume():
+    mtg = ev("roo", "会議", at(15), at(16))
+    c = plan_hour(at(16), [mtg], CFG)
+    assert (c.sound, c.text, c.volume) == ("pipipipoon", "16時です。", 0.5)  # ちょうど終わった → 読むが音量 50%
+    assert plan_hour(at(16), [ev("roo", "短い", at(15), at(15, 30))], CFG).volume == 1.0  # 途中で終わった
+    assert plan_hour(at(16), [ev("roo", "前", at(14), at(15))], CFG).volume == 1.0
+    assert plan_hour(at(15), [mtg], CFG).volume == 0.2  # 正時が予定中なら busy_volume
+    free = Event("roo", "断水", at(15), at(16), False, "", transparent=True)
+    assert plan_hour(at(16), [free], CFG).volume == 1.0  # 「予定なし」は対象外

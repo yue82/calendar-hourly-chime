@@ -71,6 +71,7 @@ class HourChimeConfig:
     announce: bool = True  # 次の時報までに始まる予定を続けて読む
     when_busy: str = "sound_only"
     busy_volume: float = 0.2  # 予定中の音量の倍率
+    just_ended_volume: float = 0.5  # 正時ちょうどに予定が終わったときの音量の倍率 (読み上げはする)
     # 平日に正時より前に鳴らすもの (text では {hour} が使える)。予定中の扱いは when_busy
     weekday_pre_cues: tuple[CueSpec, ...] = (_c("5m", "popopopopo"),)
 
@@ -257,6 +258,7 @@ def parse_config(raw: dict[str, Any], secrets: dict[str, Any] | None = None) -> 
         announce=bool(hc.get("announce", d.announce)),
         when_busy=_when_busy(hc.get("when_busy"), "hour_chime"),
         busy_volume=_volume(hc.get("busy_volume", d.busy_volume), "hour_chime"),
+        just_ended_volume=_volume(hc.get("just_ended_volume", d.just_ended_volume), "hour_chime.just_ended"),
         weekday_pre_cues=_cues(hc.get("weekday_pre_cues"), d.weekday_pre_cues),
     )
 

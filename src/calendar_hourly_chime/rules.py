@@ -173,7 +173,16 @@ def plan_hour(target: datetime, events: list[Event], cfg: Config) -> Cue:
     if hc.announce:
         text += announce_text(target, next_chime(target, events, cfg), events, cfg)
     cue = Cue("時報", target, hc.sound, text, holiday_reason(target, events, cfg) or "平日", "hour_chime")
-    return apply_busy(cue, hc.when_busy, busy_at(target, events), hc.busy_volume)
+    if busy := busy_at(target, events):
+        return apply_busy(cue, hc.when_busy, busy, hc.busy_volume)
+    if ended := ended_at(target, events):
+        return replace(cue, volume=hc.just_ended_volume, reason=f"{cue.reason} / 予定終了 ({ended.calendar}: {ended.title})")
+    return cue
+
+
+def ended_at(t: datetime, events: list[Event]) -> Event | None:
+    """t ちょうどに終わる予定 (終日・「予定なし」を除く) があればそれを返す。"""
+    return next((e for e in events if not e.all_day and not e.transparent and e.end == t), None)
 
 
 def plan_hour_pre(target: datetime, events: list[Event], cfg: Config) -> list[Cue]:
