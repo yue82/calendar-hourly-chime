@@ -242,7 +242,7 @@ def test_event_notifications():
     assert [(c.at, c.sound, c.text) for c in cues] == [
         (at(19, 20), "popopopopo", "19時25分から、ジムです。"),
         (at(19, 23), "popo", None),
-        (at(19, 24, 40), "poon", "ジムです。"),
+        (at(19, 24, 40), "pon", "ジムです。"),
         (at(19, 25), "pipoon", None),  # 開始時は言葉なし (会議が始まっているかもしれない)
     ]
 
@@ -253,7 +253,7 @@ def test_event_notifications_untitled():
     assert [(c.sound, c.text) for c in cues] == [
         ("popopopopo", "10時30分から、予定があります。"),
         ("popo", None),
-        ("poon", None),  # 予定名が無ければ 20 秒前は音だけ
+        ("pon", None),  # 予定名が無ければ 20 秒前は音だけ
         ("pipoon", None),
     ]
 
@@ -262,7 +262,7 @@ def test_event_notifications_sound_only_during_other_event():
     a = ev("roo", "A", at(14), at(14, 40))
     b = ev("roo", "B", at(14, 30), at(15))
     cues = plan_event(b.start, [b], [a, b], CFG)
-    assert [(c.sound, c.text) for c in cues] == [("popopopopo", None), ("popo", None), ("poon", None), ("pipoon", None)]
+    assert [(c.sound, c.text) for c in cues] == [("popopopopo", None), ("popo", None), ("pon", None), ("pipoon", None)]
 
 
 def test_event_notifications_on_holiday_and_quiet_hours():
@@ -275,7 +275,7 @@ def test_event_notifications_on_holiday_and_quiet_hours():
 def test_event_notification_wins_over_hour_chime():
     events = [ev("roo", "会議", at(15), at(16))]
     got = [(t, lbl, snd, txt) for t, lbl, snd, txt in audible(at(14, 59, 30), at(15, 1), events)]
-    assert got == [(at(14, 59, 40), "予定20秒前", "poon", "会議です。"), (at(15), "予定開始", "pipoon", None)]
+    assert got == [(at(14, 59, 40), "予定20秒前", "pon", "会議です。"), (at(15), "予定開始", "pipoon", None)]
     events = [ev("roo", "打合せ", at(15, 5), at(15, 30))]
     got = [(t, lbl, txt) for t, lbl, _, txt in audible(at(14, 59, 30), at(15, 1), events)]
     assert got == [(at(15), "予定5分前", "15時5分から、打合せです。")]  # 時報は鳴らない

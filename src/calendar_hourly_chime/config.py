@@ -103,7 +103,7 @@ class EventNoticeConfig:
     cues: tuple[CueSpec, ...] = (
         _c("5m", "popopopopo", "{start}から、{title}です。", "{start}から、予定があります。"),
         _c("2m", "popo"),
-        _c("20s", "poon", "{title}です。"),
+        _c("20s", "pon", "{title}です。"),
         _c("0s", "pipoon"),
     )
     when_busy: str = "sound_only"

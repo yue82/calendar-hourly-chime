@@ -43,6 +43,11 @@ def _po() -> list[float]:
     return _tone(880, 0.08, 0.03, 0.5, harmonic=0.15)
 
 
+def _pon() -> list[float]:
+    # ポーンと同じ高さで余韻を約 1 秒にした短い音 (時報のポーンと区別するため)
+    return _tone(880, 1.0, 0.25, 0.5, harmonic=0.15)
+
+
 def _pin() -> list[float]:
     return _tone(1568, 0.5, 0.12, 0.4, harmonic=0.3)
 
@@ -65,6 +70,7 @@ SOUNDS = {
     "popopopopo": (lambda: _sequence([(i * 0.1, _po()) for i in range(5)]), 0.0, None),
     "popo": (lambda: _sequence([(i * 0.1, _po()) for i in range(2)]), 0.0, None),
     "poon": (lambda: _poon(), 0.0, None),
+    "pon": (lambda: _pon(), 0.0, None),
     "pin": (lambda: _pin(), 0.0, None),
     "pinpin": (lambda: _sequence([(i * 0.22, _pin()) for i in range(2)]), 0.0, None),
     "pinpinpin": (lambda: _sequence([(i * 0.22, _pin()) for i in range(3)]), 0.0, None),

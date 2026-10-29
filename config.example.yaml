@@ -11,7 +11,7 @@
 # cues の書き方: before (5m / 20s / 0s) 前に sound を鳴らし text を読む。予定名が無いときは text_untitled。
 #   text / text_untitled が無ければ音だけ。sound が無ければ読むだけ。
 #   変数: 予定通知 {start} {title} / カウントダウン {time} {title} {n} (残り分) / 時報 {hour}
-# 組み込みの音: pipipipoon pipoon popopopopo popo poon pin pinpin pinpinpin (sounds で wav に差し替え可)
+# 組み込みの音: pipipipoon pipoon popopopopo popo poon pon pin pinpin pinpinpin (sounds で wav に差し替え可)
 timezone: Asia/Tokyo
 
 # url は secrets.yaml の calendars.<name> に書く (公開 URL ならここに url: で書いてもよい)
@@ -55,7 +55,7 @@ event_notice:
   cues:
     - {before: 5m, sound: popopopopo, text: "{start}から、{title}です。", text_untitled: "{start}から、予定があります。"}
     - {before: 2m, sound: popo}
-    - {before: 20s, sound: poon, text: "{title}です。"}
+    - {before: 20s, sound: pon, text: "{title}です。"}
     - {before: 0s, sound: pipoon}
 
 # カウントダウン (自分のタスク用なので予定名も読む)

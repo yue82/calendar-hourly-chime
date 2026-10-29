@@ -22,7 +22,7 @@ Google カレンダー (iCal) と連動する時報・予定通知・カウン�
 |---|---|---|
 | 5分前 | ポポポポポ「H時M分から、〇〇です。」 | ポポポポポ |
 | 2分前 | ポポ | ポポ |
-| 20秒前 | ポーン「〇〇です。」(予定名が無ければ音だけ) | ポーン |
+| 20秒前 | ポン「〇〇です。」(予定名が無ければ音だけ) | ポン |
 | 開始時 | ピポーン (言葉なし) | ピポーン |
 
 開始時・予定中に情報を読まないのは、Web 会議などに音声を聞かせないため。
@@ -59,7 +59,7 @@ Google カレンダー (iCal) と連動する時報・予定通知・カウン�
 - 予定中の時報 (5分前を含む) は音だけ・音量 20% (`hour_chime.busy_volume`)。予定通知・カウントダウンにも `busy_volume` がある (既定 1.0)
 - 正時ちょうどに予定が終わった時報 (例: 15:00〜16:00 の会議のあとの 16 時) は読み上げるが音量 50% (`hour_chime.just_ended_volume`)
 - `conflict_seconds` (10 秒) 以内に重なったら `priority` の順に残す (既定: カウントダウン > 予定通知 > 時報)
-- 音は組み込み (pipipipoon pipoon popopopopo popo poon pin pinpin pinpinpin) か、`sounds` で wav に差し替え
+- 音は組み込み (pipipipoon pipoon popopopopo popo poon pon pin pinpin pinpinpin) か、`sounds` で wav に差し替え
 
 ```
 タスクスケジューラ (5 分ごと x4:00/x9:00) → conhost --headless wsl.exe → calendar-hourly-chime run
